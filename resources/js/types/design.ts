@@ -1,0 +1,95 @@
+export type Pt = {
+    x: number;
+    y: number;
+};
+
+export type UvFace = {
+    id: string;
+    name: string;
+    uvPolygon: Pt[];
+};
+
+export type BoxStyle =
+    | 'mailer'
+    | 'reverse-tuck'
+    | 'straight-tuck'
+    | 'burger'
+    | 'tray'
+    | 'sleeve'
+    | 'rigid-lid-base'
+    | 'rigid-magnetic'
+    | 'rigid-drawer'
+    | 'rigid-shoulder'
+    | 'rigid-book';
+
+export type BoxParams = {
+    style: BoxStyle;
+    length: number;
+    width: number;
+    depth: number;
+    thickness: number;
+    unit: 'mm' | 'in';
+    construction: 'folding' | 'rigid' | 'corrugated';
+    rigid?: {
+        boardThickness: number;
+        turnIn: number;
+        lidDepth?: number;
+        lidClearance?: number;
+        shoulderHeight?: number;
+        magnet?: boolean;
+        ribbonPull?: boolean;
+    };
+};
+
+export type Panel = {
+    id: string;
+    name: string;
+    polygon: Pt[];
+    hinge?: { a: Pt; b: Pt };
+    parentId?: string;
+    foldAngle: number;
+    side: 'outside' | 'inside';
+    part?: 'lid' | 'base' | 'drawer' | 'sleeve' | 'tray' | 'liner';
+};
+
+export type DielineResult = {
+    panels: Panel[];
+    cutPath: string;
+    creasePaths: string[];
+    bleedPath: string;
+    safePath: string;
+    overallSize: { width: number; height: number };
+    parts?: string[];
+};
+
+export type BoxSource =
+    | { kind: 'parametric'; params: BoxParams }
+    | { kind: 'uploaded-dieline'; fileId: string; panels: Panel[]; foldMapped: boolean }
+    | { kind: 'uploaded-model'; glbUrl: string; uvLayout: UvFace[] }
+    | { kind: 'photo-mockup'; photoUrl: string; quad: [Pt, Pt, Pt, Pt] };
+
+export type CanvasObject = {
+    id: string;
+    type: 'image' | 'text' | 'shape' | 'icon' | 'qr' | 'barcode' | 'pattern' | 'group';
+    side: 'outside' | 'inside';
+    panelId?: string;
+    props: Record<string, unknown>;
+    locked?: boolean;
+    effect?: 'none' | 'emboss' | 'deboss';
+};
+
+export type DesignPartKey = 'lid' | 'base' | 'drawer' | 'sleeve' | 'tray';
+
+export type Design = {
+    source: BoxSource;
+    outside: CanvasObject[];
+    inside: CanvasObject[];
+    parts?: Partial<Record<DesignPartKey, { outside: CanvasObject[]; inside: CanvasObject[] }>>;
+    faceColors: Record<string, string>;
+    material: 'white' | 'kraft' | 'transparent' | 'wrap-paper' | 'linen' | 'leatherette' | string;
+    finish?: {
+        lamination?: 'matte' | 'gloss' | 'soft-touch';
+        foil?: 'gold' | 'silver' | 'none';
+        spotUv?: boolean;
+    };
+};

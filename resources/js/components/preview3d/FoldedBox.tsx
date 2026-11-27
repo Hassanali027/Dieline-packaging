@@ -1,13 +1,19 @@
 import { buildFoldTree, nodeQuaternion, type FoldNode } from '@/lib/three/foldTree';
+import type { ResolvedFinishProps } from '@/lib/three/materials';
 import type { DielineResult } from '@/types/design';
 import { useEffect, useMemo } from 'react';
-import { ExtrudeGeometry, Shape, Vector2, type BufferGeometry, type Quaternion, type Texture } from 'three';
+import { ExtrudeGeometry, Quaternion, Shape, Vector2, Vector3, type BufferGeometry, type Texture } from 'three';
 
 type Props = {
     result: DielineResult;
     /** Where the assembly put this piece (see lib/three/assembly.ts). */
     orientation: Quaternion;
     position: [number, number, number];
+    hingeRotation?: {
+        pivot: [number, number, number];
+        axis: [number, number, number];
+        angle: number;
+    };
     /** 0 = flat, 1 = folded. */
     progress: number;
     thickness: number;
@@ -17,7 +23,10 @@ type Props = {
     /** Printed sheet textures in dieline space (Dev 2's texture canvases). */
     outsideTexture?: Texture | null;
     insideTexture?: Texture | null;
+    bumpMap?: Texture | null;
+    finishProps?: ResolvedFinishProps;
     transparent?: boolean;
+    xRay?: boolean;
     selectedPanelId: string | null;
     onSelectPanel?: (id: string) => void;
 };
@@ -71,15 +80,25 @@ function usePanelGeometry(node: FoldNode, thickness: number, sheet: { width: num
     return geometry;
 }
 
-type NodeProps = Omit<Props, 'result' | 'orientation' | 'position'> & { node: FoldNode; sheet: { width: number; height: number } };
+type NodeProps = Omit<Props, 'result' | 'orientation' | 'position' | 'hingeRotation'> & {
+    node: FoldNode;
+    sheet: { width: number; height: number };
+};
 
 function PanelNode({ node, sheet, ...props }: NodeProps) {
     const geometry = usePanelGeometry(node, props.thickness, sheet);
     const quaternion = useMemo(() => nodeQuaternion(node, props.progress), [node, props.progress]);
     const selected = props.selectedPanelId === node.panel.id;
     const faceColor = props.faceColors[node.panel.id];
-    const transparency = props.transparent ? { transparent: true, opacity: 0.45, depthWrite: false } : {};
+    const translucent = props.transparent || props.xRay;
+    const transparency = props.xRay
+        ? { transparent: true, opacity: 0.28, depthWrite: false }
+        : props.transparent
+          ? { transparent: true, opacity: 0.45, depthWrite: false }
+          : {};
     const highlight = { emissive: selected ? '#4f46e5' : '#000000', emissiveIntensity: selected ? 0.25 : 0 };
+    const finish = props.finishProps;
+    const outsideBaseColor = finish?.foilTint ?? faceColor ?? props.outsideColor;
 
     return (
         <group position={node.offset} quaternion={quaternion}>
@@ -87,7 +106,7 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
             <mesh
                 geometry={geometry}
                 rotation={[Math.PI / 2, 0, 0]}
-                castShadow={!props.transparent}
+                castShadow={!translucent}
                 receiveShadow
                 onClick={(e) => {
                     e.stopPropagation();
@@ -99,15 +118,22 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
                     color={props.insideTexture ? '#ffffff' : props.insideColor}
                     map={props.insideTexture ?? null}
                     roughness={0.9}
+                    wireframe={props.xRay}
                     {...transparency}
                     {...highlight}
                 />
-                <meshStandardMaterial attach="material-1" color={EDGE_COLOR} roughness={0.95} {...transparency} />
-                <meshStandardMaterial
+                <meshStandardMaterial attach="material-1" color={EDGE_COLOR} roughness={0.95} wireframe={props.xRay} {...transparency} />
+                <meshPhysicalMaterial
                     attach="material-2"
-                    color={props.outsideTexture ? '#ffffff' : (faceColor ?? props.outsideColor)}
+                    color={props.outsideTexture ? (finish?.foilTint ?? '#ffffff') : outsideBaseColor}
                     map={props.outsideTexture ?? null}
-                    roughness={0.8}
+                    bumpMap={props.bumpMap ?? null}
+                    bumpScale={finish?.bumpScale ?? 0}
+                    roughness={finish?.roughness ?? 0.8}
+                    metalness={finish?.metalness ?? 0}
+                    clearcoat={finish?.clearcoat ?? 0}
+                    clearcoatRoughness={finish?.clearcoatRoughness ?? 0.4}
+                    wireframe={props.xRay}
                     {...transparency}
                     {...highlight}
                 />
@@ -120,9 +146,30 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
 }
 
 /** Folds one piece's panels around their hinges and puts it where the assembly says. */
-export default function FoldedBox({ result, orientation, position, ...props }: Props) {
+export default function FoldedBox({ result, orientation, position, hingeRotation, ...props }: Props) {
     const roots = useMemo(() => buildFoldTree(result.panels), [result]);
     const sheet = result.overallSize;
+
+    const hingeQuaternion = useMemo(() => {
+        if (!hingeRotation) return null;
+        return new Quaternion().setFromAxisAngle(new Vector3(...hingeRotation.axis), hingeRotation.angle);
+    }, [hingeRotation]);
+
+    if (hingeRotation && hingeQuaternion) {
+        const [px, py, pz] = hingeRotation.pivot;
+        const relPos: [number, number, number] = [position[0] - px, position[1] - py, position[2] - pz];
+        return (
+            <group position={hingeRotation.pivot} quaternion={hingeQuaternion}>
+                <group position={relPos}>
+                    <group quaternion={orientation}>
+                        {roots.map((root) => (
+                            <PanelNode key={root.panel.id} node={root} sheet={sheet} {...props} />
+                        ))}
+                    </group>
+                </group>
+            </group>
+        );
+    }
 
     return (
         <group position={position}>

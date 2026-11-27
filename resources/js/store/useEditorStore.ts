@@ -1,4 +1,4 @@
-import type { BoxParams, BoxSource, CanvasObject, Design, DesignPartKey } from '@/types/design';
+import type { BoxParams, BoxSource, CanvasObject, Design, DesignPartKey, Panel } from '@/types/design';
 import { temporal } from 'zundo';
 import { create } from 'zustand';
 
@@ -75,6 +75,8 @@ export interface EditorState {
     updateParams: (params: Partial<BoxParams>) => void;
     setSource: (source: BoxSource) => void;
     setMaterial: (material: Design['material']) => void;
+    setFinish: (finish: Partial<NonNullable<Design['finish']>>) => void;
+    updateUploadedPanels: (panels: Panel[], foldMapped?: boolean) => void;
     setFaceColor: (panelId: string, color: string) => void;
     setObjects: (side: BoxSide, objects: CanvasObject[]) => void;
     /** Adds an object on top and selects it. */
@@ -178,6 +180,20 @@ export const useEditorStore = create<EditorState>()(
                 set((state) => ({
                     design: { ...state.design, material },
                 })),
+            setFinish: (finish) =>
+                set((state) => ({
+                    design: { ...state.design, finish: { ...state.design.finish, ...finish } },
+                })),
+            updateUploadedPanels: (panels, foldMapped = true) =>
+                set((state) => {
+                    if (state.design.source.kind !== 'uploaded-dieline') return state;
+                    return {
+                        design: {
+                            ...state.design,
+                            source: { ...state.design.source, panels, foldMapped },
+                        },
+                    };
+                }),
             setFaceColor: (panelId, color) =>
                 set((state) => ({
                     design: {

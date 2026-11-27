@@ -1,3 +1,4 @@
+import FoldMappingPanel from '@/components/preview3d/FoldMappingPanel';
 import type { SheetTextures } from '@/hooks/use-sheet-textures';
 import { toMm } from '@/lib/dieline';
 import { downloadText } from '@/lib/export/download';
@@ -6,7 +7,7 @@ import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { useEditorStore, type CameraPreset } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
-import { Box, Download, Layers, MousePointerClick, Ruler, Scissors } from 'lucide-react';
+import { Box, Download, Eye, Layers, MousePointerClick, Ruler, Scissors, Sparkles } from 'lucide-react';
 import { lazy, Suspense, type ReactNode } from 'react';
 
 // Three.js is large; load the 3D view in its own chunk so the 2D editor paints first.
@@ -59,9 +60,15 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
     const activeSide = useEditorStore((s) => s.activeSide);
     const foldProgress = useEditorStore((s) => s.foldProgress);
     const setFoldProgress = useEditorStore((s) => s.setFoldProgress);
+    const xRay = useEditorStore((s) => s.xRay);
+    const toggleXRay = useEditorStore((s) => s.toggleXRay);
     const cameraPreset = useEditorStore((s) => s.cameraPreset);
     const setCameraPreset = useEditorStore((s) => s.setCameraPreset);
+    const source = useEditorStore((s) => s.design.source);
+    const updateUploadedPanels = useEditorStore((s) => s.updateUploadedPanels);
     const material = useEditorStore((s) => s.design.material);
+    const finish = useEditorStore((s) => s.design.finish);
+    const setFinish = useEditorStore((s) => s.setFinish);
     const faceColors = useEditorStore((s) => s.design.faceColors);
     const setFaceColor = useEditorStore((s) => s.setFaceColor);
     const selectedPanelId = useEditorStore((s) => s.selectedPanelId);
@@ -88,6 +95,17 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
                     Live 3D
                 </div>
+                <button
+                    type="button"
+                    onClick={toggleXRay}
+                    className={cn(
+                        'absolute top-3 right-3 z-10 flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase backdrop-blur transition',
+                        xRay ? 'bg-violet-500 text-white shadow' : 'bg-white/10 text-white/80 hover:bg-white/20',
+                    )}
+                >
+                    <Eye className="size-3" />
+                    X-Ray
+                </button>
                 <div className="relative aspect-[1/1]">
                     <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-white/50">Loading 3D…</div>}>
                         <Preview3D
@@ -97,6 +115,8 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                             size={size}
                             progress={foldProgress}
                             material={material}
+                            finish={finish}
+                            xRay={xRay}
                             faceColors={faceColors}
                             cameraPreset={cameraPreset}
                             selectedPanelId={selectedPanelId}
@@ -153,6 +173,67 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     <span>{rigid ? 'Closed' : 'Folded'}</span>
                 </div>
             </Card>
+
+            {/* Surface finish */}
+            <Card title="Finish" icon={<Sparkles className="size-3.5" />}>
+                <div className="flex flex-col gap-2.5">
+                    <div className="grid grid-cols-3 gap-1.5">
+                        {(['matte', 'gloss', 'soft-touch'] as const).map((lam) => (
+                            <button
+                                key={lam}
+                                type="button"
+                                onClick={() => setFinish({ lamination: lam })}
+                                className={cn(
+                                    'rounded-lg py-1.5 text-[11px] font-semibold capitalize transition',
+                                    (finish?.lamination ?? 'matte') === lam
+                                        ? 'bg-slate-900 text-white'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                                )}
+                            >
+                                {lam}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex gap-1">
+                            {(['none', 'gold', 'silver'] as const).map((foil) => (
+                                <button
+                                    key={foil}
+                                    type="button"
+                                    onClick={() => setFinish({ foil })}
+                                    className={cn(
+                                        'rounded-lg px-2.5 py-1 text-[11px] font-semibold capitalize transition',
+                                        (finish?.foil ?? 'none') === foil
+                                            ? 'bg-slate-900 text-white'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                                    )}
+                                >
+                                    {foil === 'none' ? 'No foil' : `${foil} foil`}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setFinish({ spotUv: !finish?.spotUv })}
+                            className={cn(
+                                'rounded-lg px-2.5 py-1 text-[11px] font-semibold transition',
+                                finish?.spotUv ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                            )}
+                        >
+                            Spot UV
+                        </button>
+                    </div>
+                </div>
+            </Card>
+
+            {source.kind === 'uploaded-dieline' && (
+                <FoldMappingPanel
+                    panels={source.panels}
+                    selectedPanelId={selectedPanelId}
+                    onSelectPanel={setSelectedPanelId}
+                    onChangePanels={(panels) => updateUploadedPanels(panels, true)}
+                />
+            )}
 
             {/* Selected panel */}
             <Card title="Panel" icon={<MousePointerClick className="size-3.5" />}>

@@ -1,5 +1,5 @@
-import { renderSheetTexture } from '@/components/editor/textureCanvas';
-import { materialColor } from '@/lib/three/materials';
+import { reliefObjects, renderSheetRelief, renderSheetTexture } from '@/components/editor/textureCanvas';
+import { materialColor, useMaterialsVersion } from '@/lib/three/materials';
 import type { CanvasObject, DielineResult } from '@/types/design';
 import { useEffect, useRef, useState } from 'react';
 
@@ -9,7 +9,8 @@ import { useEffect, useRef, useState } from 'react';
  */
 export type SheetSurface = { key: string; result: DielineResult; outside: CanvasObject[]; inside: CanvasObject[] };
 
-export type SurfaceCanvases = { outside: HTMLCanvasElement | null; inside: HTMLCanvasElement | null };
+/** `relief`: the outside height map (emboss / deboss), only while the surface has such objects. */
+export type SurfaceCanvases = { outside: HTMLCanvasElement | null; inside: HTMLCanvasElement | null; relief?: HTMLCanvasElement | null };
 export type SheetTextures = { surfaces: Record<string, SurfaceCanvases>; version: number };
 
 /** Redraws the texture canvases a moment after the design stops changing. */
@@ -17,10 +18,12 @@ const DEBOUNCE_MS = 250;
 
 export function useSheetTextures(surfaces: SheetSurface[], faceColors: Record<string, string>, material: string): SheetTextures {
     // Canvases are kept per surface key so the 3D textures can stay bound to them.
-    const canvases = useRef(new Map<string, { outside: HTMLCanvasElement; inside: HTMLCanvasElement }>());
+    const canvases = useRef(new Map<string, { outside: HTMLCanvasElement; inside: HTMLCanvasElement; relief: HTMLCanvasElement }>());
+    const [withRelief, setWithRelief] = useState<string[]>([]);
     const [version, setVersion] = useState(0);
     const [ready, setReady] = useState<string[]>([]);
     const run = useRef(0);
+    const materialsVersion = useMaterialsVersion();
 
     useEffect(() => {
         if (!surfaces.length) return;
@@ -32,11 +35,19 @@ export function useSheetTextures(surfaces: SheetSurface[], faceColors: Record<st
                     surfaces.flatMap((s) => {
                         let target = canvases.current.get(s.key);
                         if (!target) {
-                            target = { outside: document.createElement('canvas'), inside: document.createElement('canvas') };
+                            target = {
+                                outside: document.createElement('canvas'),
+                                inside: document.createElement('canvas'),
+                                relief: document.createElement('canvas'),
+                            };
                             canvases.current.set(s.key, target);
                         }
                         const common = { result: s.result, faceColors, isCurrent };
+                        const relief = reliefObjects(s.outside).length
+                            ? [renderSheetRelief(target.relief, { result: s.result, objects: s.outside, isCurrent })]
+                            : [];
                         return [
+                            ...relief,
                             renderSheetTexture(target.outside, {
                                 ...common,
                                 objects: s.outside,
@@ -54,6 +65,7 @@ export function useSheetTextures(surfaces: SheetSurface[], faceColors: Record<st
                 );
                 if (isCurrent()) {
                     setReady(surfaces.map((s) => s.key));
+                    setWithRelief(surfaces.filter((s) => reliefObjects(s.outside).length).map((s) => s.key));
                     setVersion((v) => v + 1);
                 }
             } catch (error) {
@@ -61,12 +73,12 @@ export function useSheetTextures(surfaces: SheetSurface[], faceColors: Record<st
             }
         }, DEBOUNCE_MS);
         return () => window.clearTimeout(timer);
-    }, [surfaces, faceColors, material]);
+    }, [surfaces, faceColors, material, materialsVersion]);
 
     const out: Record<string, SurfaceCanvases> = {};
     for (const key of ready) {
         const c = canvases.current.get(key);
-        if (c) out[key] = c;
+        if (c) out[key] = { outside: c.outside, inside: c.inside, relief: withRelief.includes(key) ? c.relief : null };
     }
     return { surfaces: out, version };
 }

@@ -1,5 +1,5 @@
 import { BLEED_MM, mirrorPathX, mirrorPolygonX } from '@/lib/dieline';
-import { materialColor } from '@/lib/three/materials';
+import { materialColor, useMaterialsVersion } from '@/lib/three/materials';
 import { surfaceObjects, useEditorStore, type BoxSide } from '@/store/useEditorStore';
 import type { CanvasObject, DielineResult, Pt } from '@/types/design';
 import { ActiveSelection, Canvas, Group, Path, Point, Polygon, Textbox, type FabricObject, type TPointerEventInfo } from 'fabric';
@@ -82,6 +82,7 @@ export default function DielineCanvas({
 
     // User objects: the store is the source of truth, Fabric shows it.
     const activePart = useEditorStore((s) => s.activePart);
+    const materialsVersion = useMaterialsVersion();
     const showTurnInWarning = useEditorStore((s) => s.showTurnInWarning);
     const lineTaggingMode = useEditorStore((s) => s.lineTaggingMode);
     const source = useEditorStore((s) => s.design.source);
@@ -515,7 +516,7 @@ export default function DielineCanvas({
             fittedFor.current = key;
             fit();
         }
-    }, [result, side, material, faceColors, selectedPanelId, showTurnInWarning, lineTaggingMode, source, fit, restack]);
+    }, [result, side, material, materialsVersion, faceColors, selectedPanelId, showTurnInWarning, lineTaggingMode, source, fit, restack]);
 
     // Store -> Fabric: add, update, remove and reorder user objects for the visible side.
     useEffect(() => {
@@ -555,7 +556,12 @@ export default function DielineCanvas({
             const fo = map.get(obj.id);
             if (fo && applyToFabric(fo, obj)) continue;
             if (fo) {
+                // Rebuilding (new image, curve, pattern tile…) is not a deselect: removing the active
+                // object fires selection:cleared, which must not empty the store's selection, or the
+                // toolbar closes mid-edit. syncSelection() selects the new object once it is added.
+                selecting.current = true;
                 canvas.remove(fo);
+                selecting.current = false;
                 map.delete(obj.id);
             }
             pending.push(

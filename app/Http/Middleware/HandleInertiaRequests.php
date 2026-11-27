@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Rules\Turnstile;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -41,6 +42,8 @@ class HandleInertiaRequests extends Middleware
         return array_merge(parent::share($request), [
             ...parent::share($request),
             'name' => config('app.name'),
+            // Public key for the Turnstile widget on the Share / Quote forms; null = no check.
+            'turnstileSiteKey' => Turnstile::enabled() ? config('dieline.turnstile.site_key') : null,
             'quote' => ['message' => trim($message), 'author' => trim($author)],
             'auth' => [
                 'user' => $request->user(),

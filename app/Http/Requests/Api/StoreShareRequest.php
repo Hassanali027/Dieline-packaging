@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api;
 
+use App\Rules\Turnstile;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreShareRequest extends FormRequest
@@ -20,6 +21,8 @@ class StoreShareRequest extends FormRequest
             'customer_name' => ['required', 'string', 'max:120'],
             'customer_email' => ['required', 'email', 'max:190'],
             'customer_phone' => ['required', 'string', 'max:40'],
+            // Cloudflare Turnstile token (only checked when the site has Turnstile keys).
+            'turnstile_token' => [new Turnstile($this->ip())],
             'design' => ['required', 'array'],
             'design.source' => ['required', 'array'],
             'design.source.kind' => ['required', 'in:parametric,uploaded-dieline,uploaded-model,photo-mockup'],

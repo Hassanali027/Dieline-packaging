@@ -71,8 +71,8 @@ export type ShareContact = { customer_name: string; customer_email: string; cust
 export type ShareLink = { token: string; url: string; expires_at: string };
 
 /** Freezes a copy of the design behind an expiring read-only link (/s/{token}). */
-export function createShare(design: Design, contact: ShareContact): Promise<{ data: ShareLink }> {
-    return api('/api/share', { method: 'POST', body: JSON.stringify({ ...contact, design }) });
+export function createShare(design: Design, contact: ShareContact, turnstileToken?: string | null): Promise<{ data: ShareLink }> {
+    return api('/api/share', { method: 'POST', body: JSON.stringify({ ...contact, design, turnstile_token: turnstileToken ?? undefined }) });
 }
 
 export type QuoteRequest = {
@@ -94,6 +94,8 @@ export type QuoteRequest = {
     design_id?: number | null;
     outside_png?: string;
     inside_png?: string;
+    /** Cloudflare Turnstile token, when the site has Turnstile on. */
+    turnstile_token?: string;
 };
 
 /** "Submit & get a quote" (emails the customer and the admin). */
@@ -105,4 +107,31 @@ export function uploadImage(file: File): Promise<{ data: UploadedAsset }> {
     const form = new FormData();
     form.append('file', file);
     return api('/api/uploads', { method: 'POST', body: form });
+}
+
+/** An icon from the admin library. `svg` is sanitised markup; `src` is the same as a data: URI. */
+export type LibraryIcon = { id: number; name: string; category: string | null; svg: string; src: string };
+
+/** A repeating tile. `src` is the tile to repeat (an image URL, or the SVG as a data: URI). */
+export type LibraryPattern = { id: number; name: string; category: string | null; svg: string | null; src: string };
+
+/** Same fields as the editor's MATERIAL_COLORS entries (lib/three/materials.ts), plus who may use it. */
+export type LibraryMaterial = {
+    id: number;
+    slug: string;
+    name: string;
+    category: 'board' | 'wrap' | null;
+    outside: string;
+    inside: string;
+    roughness: number;
+    bumpScale: number;
+    constructions: Array<'folding' | 'corrugated' | 'rigid'>;
+    image_url: string | null;
+};
+
+export type Library = { icons: LibraryIcon[]; patterns: LibraryPattern[]; materials: LibraryMaterial[] };
+
+/** Active icons, patterns and materials, managed by admins in Filament (Library group). */
+export function fetchLibrary(): Promise<{ data: Library }> {
+    return api('/api/library');
 }

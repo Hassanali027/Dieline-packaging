@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\CustomBoxFileController;
 use App\Http\Controllers\Admin\QuoteFileController;
 use App\Http\Controllers\Api\CustomBoxController;
 use App\Http\Controllers\Api\DesignController;
+use App\Http\Controllers\Api\LibraryController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\ShareController;
 use App\Http\Controllers\Api\UploadController;
@@ -26,6 +27,9 @@ Route::prefix('api')->name('api.')->middleware('throttle:120,1')->group(function
     Route::post('uploads', [UploadController::class, 'store'])->middleware('throttle:30,1')->name('uploads.store');
 
     Route::apiResource('designs', DesignController::class);
+
+    // Icons, patterns and materials managed in Filament (Library).
+    Route::get('library', LibraryController::class)->name('library');
 
     // Customers' own boxes (dieline / 3D model / photo).
     Route::get('custom-boxes', [CustomBoxController::class, 'index'])->name('custom-boxes.index');

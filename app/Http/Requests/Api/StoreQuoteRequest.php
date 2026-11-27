@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api;
 
 use App\Models\Design;
+use App\Rules\Turnstile;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Validator;
@@ -26,6 +27,8 @@ class StoreQuoteRequest extends FormRequest
             'customer_name' => ['required', 'string', 'max:120'],
             'customer_email' => ['required', 'email', 'max:190'],
             'customer_phone' => ['required', 'string', 'max:40'],
+            // Cloudflare Turnstile token (only checked when the site has Turnstile keys).
+            'turnstile_token' => [new Turnstile($this->ip())],
             'company_name' => ['nullable', 'string', 'max:120'],
             'length' => ['required', 'numeric', 'gt:0', 'max:5000'],
             'width' => ['required', 'numeric', 'gt:0', 'max:5000'],

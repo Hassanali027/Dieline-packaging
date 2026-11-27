@@ -3,6 +3,7 @@ import BoxSettings from '@/components/editor/BoxSettings';
 import DielineCanvas, { type CanvasController } from '@/components/editor/DielineCanvas';
 import EditorHeader from '@/components/editor/EditorHeader';
 import EditorSidebar from '@/components/editor/EditorSidebar';
+import { loadLibrary } from '@/components/editor/library';
 import QuoteDialog, { type QuotePreviews } from '@/components/editor/QuoteDialog';
 import RightPanel from '@/components/editor/RightPanel';
 import { clearDraft, DraftBanner, draftHasWork, readDraft, type Draft } from '@/components/editor/SaveControls';
@@ -13,6 +14,7 @@ import { useDieline } from '@/hooks/use-dieline';
 import { useSheetTextures, type SheetSurface } from '@/hooks/use-sheet-textures';
 import type { SavedDesign } from '@/lib/api';
 import { extractPart } from '@/lib/dieline';
+import { registerMaterials } from '@/lib/three/materials';
 import { replacePath, replaceUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
@@ -149,6 +151,13 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
         setDraftOffer(null);
     };
 
+    // Materials managed in Filament (Library) join the picker, the 2D sheet and the 3D box.
+    useEffect(() => {
+        loadLibrary()
+            .then((library) => registerMaterials(library.materials.map((m) => ({ ...m, label: m.name }))))
+            .catch(() => undefined); // the built-in materials keep working
+    }, []);
+
     // Ctrl/Cmd + Z / Y (Shift+Z) for undo / redo, ignored while typing in a field or editing canvas text.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -193,7 +202,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
                             panels={{
                                 box: <BoxSettings products={products} params={params} errors={errors} onPickProduct={pickProduct} />,
                                 uploads: <UploadsPanel sheet={sheet} />,
-                                elements: <ElementsPanel sheet={sheet} />,
+                                elements: <ElementsPanel sheet={sheet} result={sheetResult} />,
                                 text: <TextPanel sheet={sheet} />,
                                 qr: <QrBarcodePanel sheet={sheet} />,
                             }}

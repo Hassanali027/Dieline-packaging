@@ -3,6 +3,7 @@ import { ApiError, createShare, type ShareContact, type ShareLink } from '@/lib/
 import { useEditorStore } from '@/store/useEditorStore';
 import { Check, Copy, Loader2, Share2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import TurnstileWidget, { useTurnstileSiteKey } from './TurnstileWidget';
 
 const EMPTY: ShareContact = { customer_name: '', customer_email: '', customer_phone: '' };
 
@@ -14,18 +15,23 @@ export default function ShareDialog() {
     const [busy, setBusy] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [copied, setCopied] = useState(false);
+    const siteKey = useTurnstileSiteKey();
+    const [captcha, setCaptcha] = useState<string | null>(null);
+    const [captchaRound, setCaptchaRound] = useState(0);
 
     const submit = async (e: FormEvent) => {
         e.preventDefault();
         setBusy(true);
         setErrors({});
         try {
-            const { data } = await createShare(useEditorStore.getState().design, contact);
+            const { data } = await createShare(useEditorStore.getState().design, contact, captcha);
             setLink(data);
         } catch (err) {
             const apiError = err as ApiError;
             const fieldErrors = Object.fromEntries(Object.entries(apiError.errors ?? {}).map(([k, v]) => [k, v[0]]));
             setErrors(Object.keys(fieldErrors).length ? fieldErrors : { form: apiError.message });
+            // A Turnstile token works once: get a fresh one for the next try.
+            if (siteKey) setCaptchaRound((n) => n + 1);
         } finally {
             setBusy(false);
         }
@@ -107,9 +113,11 @@ export default function ShareDialog() {
                         {field('customer_email', 'Email', 'email', 'email')}
                         {field('customer_phone', 'Phone', 'tel', 'tel')}
                         {errors.form && <p className="text-xs text-rose-600">{errors.form}</p>}
+                        {siteKey && <TurnstileWidget siteKey={siteKey} onToken={setCaptcha} resetKey={captchaRound} />}
+                        {errors.turnstile_token && <p className="text-xs text-rose-600">{errors.turnstile_token}</p>}
                         <button
                             type="submit"
-                            disabled={busy}
+                            disabled={busy || (!!siteKey && !captcha)}
                             className="mt-1 flex items-center justify-center gap-2 rounded-md bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
                         >
                             {busy && <Loader2 className="size-4 animate-spin" />}

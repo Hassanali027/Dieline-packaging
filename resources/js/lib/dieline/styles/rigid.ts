@@ -62,7 +62,7 @@ export function rigidSizes(params: BoxParams): RigidSizes {
 }
 
 /** Wrap for one chipboard tray of outer size length × width × height. */
-export function wrapPanels(part: 'lid' | 'base' | 'drawer', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
+export function wrapPanels(part: 'lid' | 'base', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
     const Lo = length;
     const Wo = width;
     const H = height;
@@ -72,7 +72,7 @@ export function wrapPanels(part: 'lid' | 'base' | 'drawer', length: number, widt
     const earTaper = ear * 0.4;
     const id = (name: string) => `${part}-${name}`;
     const face = part === 'lid' ? 'top' : 'bottom';
-    const label = (name: string) => `${part === 'lid' ? 'Lid' : part === 'drawer' ? 'Drawer' : 'Base'} ${name}`;
+    const label = (name: string) => `${part === 'lid' ? 'Lid' : 'Base'} ${name}`;
 
     const walls: [string, string, Panel['polygon'], { a: ReturnType<typeof pt>; b: ReturnType<typeof pt> }][] = [
         ['back', 'Back', rect(0, -H, Lo, H), hinge(pt(0, 0), pt(Lo, 0))],
@@ -139,8 +139,8 @@ export function wrapPanels(part: 'lid' | 'base' | 'drawer', length: number, widt
 }
 
 /** Liner: inside floor plus the inside walls below the turn-in. */
-export function linerPanels(length: number, width: number, wall: number, part: 'liner' | 'tray' = 'liner'): Panel[] {
-    const floor: Panel = { id: `${part}-floor`, name: part === 'tray' ? 'Tray Floor' : 'Liner Floor', polygon: rect(0, 0, length, width), foldAngle: 0, side: 'outside', part };
+export function linerPanels(length: number, width: number, wall: number): Panel[] {
+    const floor: Panel = { id: 'liner-floor', name: 'Liner Floor', polygon: rect(0, 0, length, width), foldAngle: 0, side: 'outside', part: 'liner' };
     if (wall < 3) return [floor];
     const w = wall;
     const sides: [string, Panel['polygon'], ReturnType<typeof pt>, ReturnType<typeof pt>][] = [
@@ -153,14 +153,14 @@ export function linerPanels(length: number, width: number, wall: number, part: '
         floor,
         ...sides.map(
             ([key, polygon, a, b]): Panel => ({
-                id: `${part}-${key}`,
-                name: `${part === 'tray' ? 'Tray' : 'Liner'} ${key[0].toUpperCase()}${key.slice(1)}`,
+                id: `liner-${key}`,
+                name: `Liner ${key[0].toUpperCase()}${key.slice(1)}`,
                 polygon,
                 hinge: hinge(a, b),
-                parentId: `${part}-floor`,
+                parentId: 'liner-floor',
                 foldAngle: 90,
                 side: 'outside',
-                part,
+                part: 'liner',
             }),
         ),
     ];
@@ -190,14 +190,8 @@ function chipboardList(s: RigidSizes): ChipboardPiece[] {
 /** Gap between parts when they share one sheet, mm. */
 const PART_GAP = 25;
 
-export function rigidLidBasePanels(params: BoxParams): { panels: Panel[]; sizes: RigidSizes } {
-    const s = rigidSizes(params);
-    const groups = [
-        wrapPanels('lid', s.lid.length, s.lid.width, s.lid.height, s.turnIn, s.board),
-        wrapPanels('base', s.base.length, s.base.width, s.base.height, s.turnIn, s.board),
-        linerPanels(s.liner.length, s.liner.width, s.liner.wall),
-    ];
-    // Lay the parts out left to right, top-aligned, so a combined sheet never overlaps.
+/** Lays the parts of a rigid box out left to right, top-aligned, so a combined sheet never overlaps. */
+export function layoutParts(groups: Panel[][]): Panel[] {
     const panels: Panel[] = [];
     let x = 0;
     for (const group of groups) {
@@ -213,6 +207,16 @@ export function rigidLidBasePanels(params: BoxParams): { panels: Panel[]; sizes:
         }
         x += b.width + PART_GAP;
     }
+    return panels;
+}
+
+export function rigidLidBasePanels(params: BoxParams): { panels: Panel[]; sizes: RigidSizes } {
+    const s = rigidSizes(params);
+    const panels = layoutParts([
+        wrapPanels('lid', s.lid.length, s.lid.width, s.lid.height, s.turnIn, s.board),
+        wrapPanels('base', s.base.length, s.base.width, s.base.height, s.turnIn, s.board),
+        linerPanels(s.liner.length, s.liner.width, s.liner.wall),
+    ]);
     return { panels, sizes: s };
 }
 

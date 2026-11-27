@@ -1,12 +1,12 @@
 import type { SheetTextures } from '@/hooks/use-sheet-textures';
 import { buildAssembly, type AssemblyPiece } from '@/lib/three/assembly';
-import { materialColor } from '@/lib/three/materials';
+import { getMaterialBumpMap, materialColor, resolveFinishProps, type ResolvedFinishProps } from '@/lib/three/materials';
 import type { CameraPreset } from '@/store/useEditorStore';
-import type { BoxStyle, DielineResult } from '@/types/design';
+import type { BoxStyle, Design, DielineResult } from '@/types/design';
 import { ContactShadows, OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
-import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Vector3 } from 'three';
+import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Texture, type Vector3 } from 'three';
 import FoldedBox from './FoldedBox';
 
 type Props = {
@@ -16,6 +16,8 @@ type Props = {
     size: { length: number; width: number; depth: number; thickness: number } | null;
     progress: number;
     material: string;
+    finish?: Design['finish'];
+    xRay?: boolean;
     faceColors: Record<string, string>;
     cameraPreset: CameraPreset;
     selectedPanelId: string | null;
@@ -86,6 +88,8 @@ export default function Preview3D({
     size,
     progress,
     material,
+    finish,
+    xRay = false,
     faceColors,
     cameraPreset,
     selectedPanelId,
@@ -93,6 +97,8 @@ export default function Preview3D({
 }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const pieces = useMemo(() => (result && size ? buildAssembly(style, result, progress, size.thickness) : []), [result, style, progress, size]);
+    const finishProps = useMemo(() => resolveFinishProps(material, finish), [material, finish]);
+    const bumpMap = useMemo(() => getMaterialBumpMap(material), [material]);
     const extent = size ? Math.max(size.length, size.width, size.depth) : 200;
 
     return (
@@ -131,6 +137,9 @@ export default function Preview3D({
                             version={textures?.version ?? 0}
                             thickness={size.thickness}
                             material={material}
+                            finishProps={finishProps}
+                            bumpMap={bumpMap}
+                            xRay={xRay}
                             faceColors={faceColors}
                             selectedPanelId={selectedPanelId}
                             onSelectPanel={onSelectPanel}
@@ -152,6 +161,9 @@ function PieceBox({
     version,
     thickness,
     material,
+    finishProps,
+    bumpMap,
+    xRay,
     faceColors,
     selectedPanelId,
     onSelectPanel,
@@ -161,6 +173,9 @@ function PieceBox({
     version: number;
     thickness: number;
     material: string;
+    finishProps: ResolvedFinishProps;
+    bumpMap: Texture | null;
+    xRay: boolean;
     faceColors: Record<string, string>;
     selectedPanelId: string | null;
     onSelectPanel?: (id: string | null) => void;
@@ -172,10 +187,14 @@ function PieceBox({
             result={piece.result}
             orientation={piece.orientation}
             position={piece.position}
+            hingeRotation={piece.hingeRotation}
             progress={piece.fold}
             outsideTexture={outsideTexture}
             insideTexture={insideTexture}
+            bumpMap={bumpMap}
+            finishProps={finishProps}
             transparent={material === 'transparent'}
+            xRay={xRay}
             thickness={thickness}
             outsideColor={materialColor(material, 'outside')}
             insideColor={materialColor(material, 'inside')}

@@ -156,3 +156,28 @@
         @apply bg-background text-foreground;
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Dieline editor                                                      */
+/* ------------------------------------------------------------------ */
+
+/* Dotted drafting grid behind the 2D canvas. */
+.editor-grid {
+    background-color: #f3f4f8;
+    background-image: radial-gradient(circle, #cfd4e0 1px, transparent 1.2px);
+    background-size: 22px 22px;
+}
+
+/* Soft "photo studio" backdrop for the 3D preview. */
+.editor-studio {
+    background:
+        radial-gradient(120% 90% at 50% 0%, #3b3f5c 0%, transparent 60%), radial-gradient(80% 60% at 50% 100%, #1e1b3a 0%, transparent 70%),
+        linear-gradient(180deg, #23263a 0%, #14151f 100%);
+}
+
+/* Frosted floating controls on top of the canvas. */
+.editor-glass {
+    background-color: rgb(255 255 255 / 0.82);
+    backdrop-filter: blur(12px) saturate(1.4);
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+}

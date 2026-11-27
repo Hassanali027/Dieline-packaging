@@ -67,9 +67,9 @@ export default function ShareDialog() {
             <DialogTrigger asChild>
                 <button
                     type="button"
-                    className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-700 shadow-xs hover:bg-slate-50"
+                    className="flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                 >
-                    <Share2 className="size-3.5" />
+                    <Share2 className="size-4" />
                     Share
                 </button>
             </DialogTrigger>

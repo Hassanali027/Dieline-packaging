@@ -53,7 +53,7 @@ export function TextPanel({ sheet }: PanelProps) {
                     disabled={!sheet}
                     onClick={() => sheet && addObject(side, makeText(b.preset, side, sheet))}
                     className={cn(
-                        'rounded-lg border border-slate-200 px-3 py-3 text-left text-slate-800 hover:bg-slate-50 disabled:opacity-40',
+                        'rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left text-slate-900 transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-md hover:shadow-violet-100 disabled:opacity-40',
                         b.className,
                     )}
                 >
@@ -62,7 +62,7 @@ export function TextPanel({ sheet }: PanelProps) {
             ))}
             <p className="text-xs text-slate-500">Double-click text on the canvas to edit it.</p>
 
-            <h3 className="mt-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">Font combinations</h3>
+            <h3 className="mt-3 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">Font combinations</h3>
             <div className="grid grid-cols-2 gap-2">
                 {FONT_COMBOS.map((c) => (
                     <button
@@ -70,7 +70,7 @@ export function TextPanel({ sheet }: PanelProps) {
                         type="button"
                         disabled={!sheet}
                         onClick={() => addCombo(c)}
-                        className="rounded-lg border border-slate-200 px-2 py-2.5 text-center hover:bg-slate-50 disabled:opacity-40"
+                        className="rounded-2xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 px-2 py-3 text-center transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-md hover:shadow-violet-100 disabled:opacity-40"
                     >
                         <div className="truncate text-base leading-tight text-slate-900" style={{ fontFamily: `"${c.heading}"` }}>
                             {c.headingText}
@@ -82,7 +82,7 @@ export function TextPanel({ sheet }: PanelProps) {
                 ))}
             </div>
 
-            <h3 className="mt-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">Quick text</h3>
+            <h3 className="mt-3 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">Quick text</h3>
             <div className="flex flex-wrap gap-1.5">
                 {QUICK_TEXTS.map((t) => (
                     <button
@@ -90,7 +90,7 @@ export function TextPanel({ sheet }: PanelProps) {
                         type="button"
                         disabled={!sheet}
                         onClick={() => sheet && addObject(side, makeTextWith({ text: t, fontSizePt: 16, fontWeight: 'bold' }, side, sheet))}
-                        className="rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 disabled:opacity-40"
                     >
                         {t}
                     </button>
@@ -116,7 +116,7 @@ export function ElementsPanel({ sheet }: PanelProps) {
     const { side, addObject } = useAdd();
     return (
         <div>
-            <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Shapes</h3>
+            <h3 className="mb-2 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">Shapes</h3>
             <div className="grid grid-cols-3 gap-2">
                 {SHAPES.map((s) => (
                     <button
@@ -124,7 +124,7 @@ export function ElementsPanel({ sheet }: PanelProps) {
                         type="button"
                         disabled={!sheet}
                         onClick={() => sheet && addObject(side, makeShape(s.kind, side, sheet))}
-                        className="flex flex-col items-center gap-1 rounded-lg border border-slate-200 py-3 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                        className="flex flex-col items-center gap-1.5 rounded-2xl border border-slate-200 bg-white py-4 text-[11px] font-medium text-slate-600 transition hover:-translate-y-0.5 hover:border-violet-300 hover:text-violet-700 hover:shadow-md hover:shadow-violet-100 disabled:opacity-40"
                     >
                         {s.icon}
                         {s.label}
@@ -207,7 +207,7 @@ export function UploadsPanel({ sheet }: PanelProps) {
                     e.preventDefault();
                     void onFiles(e.dataTransfer.files);
                 }}
-                className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-300 px-4 py-6 text-sm text-slate-600 hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-violet-200 bg-violet-50/40 px-4 py-7 text-sm text-slate-600 transition hover:border-violet-400 hover:bg-violet-50 disabled:opacity-50"
             >
                 {busy ? <Loader2 className="size-6 animate-spin" /> : <Upload className="size-6" />}
                 <span className="font-medium">{busy ? 'Uploading…' : 'Upload images'}</span>
@@ -216,7 +216,7 @@ export function UploadsPanel({ sheet }: PanelProps) {
             {error && <p className="rounded-md bg-rose-50 p-2 text-xs text-rose-700">{error}</p>}
             {assets.length > 0 && (
                 <div>
-                    <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Your uploads</h3>
+                    <h3 className="mb-2 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">Your uploads</h3>
                     <div className="grid grid-cols-3 gap-2">
                         {assets.map((a) => (
                             <button

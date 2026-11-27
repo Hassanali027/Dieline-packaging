@@ -6,13 +6,20 @@ import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { useEditorStore, type CameraPreset } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
-import { Download } from 'lucide-react';
-import { lazy, Suspense } from 'react';
+import { Box, Download, Layers, MousePointerClick, Ruler, Scissors } from 'lucide-react';
+import { lazy, Suspense, type ReactNode } from 'react';
 
 // Three.js is large; load the 3D view in its own chunk so the 2D editor paints first.
 const Preview3D = lazy(() => import('@/components/preview3d/Preview3D'));
 
-const PRESETS: CameraPreset[] = ['front', 'back', 'left', 'right', 'top', 'bottom'];
+const PRESETS: { id: CameraPreset; label: string; short: string }[] = [
+    { id: 'front', label: 'Front', short: 'F' },
+    { id: 'back', label: 'Back', short: 'B' },
+    { id: 'left', label: 'Left', short: 'L' },
+    { id: 'right', label: 'Right', short: 'R' },
+    { id: 'top', label: 'Top', short: 'T' },
+    { id: 'bottom', label: 'Bottom', short: 'Bt' },
+];
 
 type Props = {
     /** The whole box (all parts), for the 3D view. */
@@ -23,10 +30,33 @@ type Props = {
     textures?: SheetTextures | null;
 };
 
+function Card({ title, icon, children, aside }: { title: string; icon?: ReactNode; children: ReactNode; aside?: ReactNode }) {
+    return (
+        <section className="shrink-0 rounded-2xl border border-slate-200/80 bg-white p-4">
+            <div className="mb-3 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">
+                    {icon}
+                    {title}
+                </h3>
+                {aside}
+            </div>
+            {children}
+        </section>
+    );
+}
+
+function Stat({ label, value }: { label: string; value: ReactNode }) {
+    return (
+        <div className="rounded-xl bg-slate-50 px-3 py-2.5">
+            <div className="text-[10px] font-medium text-slate-500">{label}</div>
+            <div className="mt-0.5 text-sm font-bold text-slate-900 tabular-nums">{value}</div>
+        </div>
+    );
+}
+
 export default function RightPanel({ result, sheetResult, params, textures }: Props) {
     const sheet = sheetResult ?? result;
     const activeSide = useEditorStore((s) => s.activeSide);
-    const setActiveSide = useEditorStore((s) => s.setActiveSide);
     const foldProgress = useEditorStore((s) => s.foldProgress);
     const setFoldProgress = useEditorStore((s) => s.setFoldProgress);
     const cameraPreset = useEditorStore((s) => s.cameraPreset);
@@ -46,53 +76,66 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
           }
         : null;
 
+    const rigid = !!result?.parts?.length;
     const selectedPanel = result?.panels.find((p) => p.id === selectedPanelId) ?? null;
+    const percent = Math.round(foldProgress * 100);
 
     return (
-        <aside className="flex h-full w-[360px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-white p-4">
-            <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
-                <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-slate-400">Loading 3D…</div>}>
-                    <Preview3D
-                        result={result}
-                        style={params?.style}
-                        textures={textures}
-                        size={size}
-                        progress={foldProgress}
-                        material={material}
-                        faceColors={faceColors}
-                        cameraPreset={cameraPreset}
-                        selectedPanelId={selectedPanelId}
-                        onSelectPanel={setSelectedPanelId}
-                    />
-                </Suspense>
-                {!result && (
-                    <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-xs text-slate-500">
-                        3D preview appears when this box style has a dieline.
+        <aside className="flex h-full w-[360px] shrink-0 flex-col gap-3 overflow-y-auto border-l border-slate-200/80 bg-slate-50/80 p-3 [scrollbar-width:thin]">
+            {/* 3D studio */}
+            <section className="editor-studio relative shrink-0 overflow-hidden rounded-3xl shadow-xl ring-1 shadow-slate-900/20 ring-black/10">
+                <div className="absolute top-3 left-3 z-10 flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold tracking-wide text-white/80 uppercase backdrop-blur">
+                    <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+                    Live 3D
+                </div>
+                <div className="relative aspect-[1/1]">
+                    <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-white/50">Loading 3D…</div>}>
+                        <Preview3D
+                            result={result}
+                            style={params?.style}
+                            textures={textures}
+                            size={size}
+                            progress={foldProgress}
+                            material={material}
+                            faceColors={faceColors}
+                            cameraPreset={cameraPreset}
+                            selectedPanelId={selectedPanelId}
+                            onSelectPanel={setSelectedPanelId}
+                        />
+                    </Suspense>
+                    {!result && (
+                        <div className="absolute inset-0 flex items-center justify-center p-8 text-center text-xs text-white/60">
+                            3D preview appears when this box style has a dieline.
+                        </div>
+                    )}
+                </div>
+                {/* Camera presets, docked on the viewer */}
+                <div className="absolute inset-x-3 bottom-3 z-10 flex justify-center">
+                    <div className="flex gap-0.5 rounded-2xl bg-black/35 p-1 ring-1 ring-white/10 backdrop-blur-md">
+                        {PRESETS.map((p) => (
+                            <button
+                                key={p.id}
+                                type="button"
+                                title={`${p.label} view`}
+                                onClick={() => setCameraPreset(p.id)}
+                                className={cn(
+                                    'rounded-xl px-2.5 py-1.5 text-[11px] font-semibold transition',
+                                    cameraPreset === p.id ? 'bg-white text-slate-900 shadow' : 'text-white/70 hover:bg-white/10 hover:text-white',
+                                )}
+                            >
+                                {p.label}
+                            </button>
+                        ))}
                     </div>
-                )}
-            </div>
+                </div>
+            </section>
 
-            <div className="grid grid-cols-3 gap-1.5">
-                {PRESETS.map((preset) => (
-                    <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setCameraPreset(preset)}
-                        className={cn(
-                            'rounded-md py-1.5 text-xs font-medium capitalize',
-                            cameraPreset === preset ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-                        )}
-                    >
-                        {preset}
-                    </button>
-                ))}
-            </div>
-
-            <div>
-                <label htmlFor="fold-progress" className="flex justify-between text-xs font-medium text-slate-600">
-                    <span>Open / Close</span>
-                    <span className="tabular-nums">{Math.round(foldProgress * 100)}%</span>
-                </label>
+            {/* Open / close */}
+            <Card
+                title={rigid ? 'Lid' : 'Fold'}
+                icon={<Box className="size-3.5" />}
+                aside={<span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700 tabular-nums">{percent}%</span>}
+            >
                 <input
                     id="fold-progress"
                     type="range"
@@ -100,93 +143,97 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     max={1}
                     step={0.01}
                     value={foldProgress}
+                    aria-label={rigid ? 'Lift or close the lid' : 'Fold the box'}
                     onChange={(e) => setFoldProgress(Number(e.target.value))}
-                    className="mt-1 w-full accent-slate-900"
+                    className="h-2 w-full cursor-pointer appearance-none rounded-full accent-violet-600"
+                    style={{ background: `linear-gradient(90deg, #7c3aed ${percent}%, #e2e8f0 ${percent}%)` }}
                 />
-            </div>
+                <div className="mt-1.5 flex justify-between text-[10px] font-medium text-slate-400">
+                    <span>{rigid ? 'Open' : 'Flat'}</span>
+                    <span>{rigid ? 'Closed' : 'Folded'}</span>
+                </div>
+            </Card>
 
-            <div className="flex gap-2">
-                {(['outside', 'inside'] as const).map((side) => (
-                    <button
-                        key={side}
-                        type="button"
-                        onClick={() => setActiveSide(side)}
-                        className={cn(
-                            'flex-1 rounded-md py-1.5 text-xs font-medium capitalize',
-                            activeSide === side ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-                        )}
-                    >
-                        {side}
-                    </button>
-                ))}
-            </div>
-
-            <div className="rounded-lg border border-slate-200 p-3 text-xs">
+            {/* Selected panel */}
+            <Card title="Panel" icon={<MousePointerClick className="size-3.5" />}>
                 {selectedPanel ? (
-                    <div className="flex items-center justify-between gap-2">
-                        <div>
-                            <div className="font-medium text-slate-900">{selectedPanel.name}</div>
-                            <div className="text-slate-500">Panel colour</div>
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">{selectedPanel.name}</div>
+                            <div className="text-[11px] text-slate-500">Fill colour · {activeSide}</div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <label
+                            className="relative size-10 shrink-0 cursor-pointer overflow-hidden rounded-xl border border-slate-200 shadow-inner"
+                            style={{ background: faceColors[selectedPanel.id] ?? materialColor(material, activeSide) }}
+                        >
                             <input
                                 type="color"
                                 aria-label={`${selectedPanel.name} colour`}
                                 value={toHexColor(faceColors[selectedPanel.id] ?? materialColor(material, activeSide))}
                                 onChange={(e) => setFaceColor(selectedPanel.id, e.target.value)}
-                                className="h-8 w-10 cursor-pointer rounded border border-slate-200"
+                                className="absolute inset-0 cursor-pointer opacity-0"
                             />
-                        </div>
+                        </label>
                     </div>
                 ) : (
-                    <p className="text-slate-500">Click a panel on the 2D dieline or the 3D box to select it.</p>
+                    <p className="text-xs leading-relaxed text-slate-500">Click a panel on the dieline or on the 3D box to colour it.</p>
                 )}
-            </div>
+            </Card>
 
+            {/* Sheet facts */}
             {sheet && (
-                <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-500">
-                    <dt>Sheet size</dt>
-                    <dd className="text-right text-slate-700 tabular-nums">
-                        {Math.round(sheet.overallSize.width)} × {Math.round(sheet.overallSize.height)} mm
-                    </dd>
-                    <dt>Panels</dt>
-                    <dd className="text-right text-slate-700">{sheet.panels.length}</dd>
-                    <dt className="col-span-2 mt-2 flex flex-wrap gap-3">
+                <Card title="Sheet" icon={<Ruler className="size-3.5" />}>
+                    <div className="grid grid-cols-2 gap-2">
+                        <Stat
+                            label="Flat size"
+                            value={
+                                <>
+                                    {Math.round(sheet.overallSize.width)} × {Math.round(sheet.overallSize.height)}
+                                    <span className="ml-0.5 text-[10px] font-medium text-slate-400">mm</span>
+                                </>
+                            }
+                        />
+                        <Stat label="Panels" value={sheet.panels.length} />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
                         <Legend color="#0f172a" label="Cut" />
                         <Legend color="#e11d48" label="Crease" dashed />
-                        <Legend color="#38bdf8" label="Bleed 3 mm" dashed />
+                        <Legend color="#38bdf8" label="Bleed" dashed />
                         <Legend color="#22c55e" label="Safe" dashed />
-                    </dt>
-                </dl>
+                    </div>
+                </Card>
             )}
 
             {result?.chipboard && (
-                <div className="rounded-lg border border-slate-200 p-3 text-[11px]">
-                    <div className="mb-1.5 font-semibold text-slate-700">Chipboard cutting list</div>
-                    <table className="w-full text-slate-600">
-                        <tbody>
-                            {result.chipboard.map((c) => (
-                                <tr key={c.name}>
-                                    <td className="py-0.5">{c.name}</td>
-                                    <td className="py-0.5 text-right tabular-nums">
-                                        {c.width} × {c.height} mm
-                                    </td>
-                                    <td className="py-0.5 pl-2 text-right tabular-nums">×{c.quantity}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                <Card title="Chipboard cutting list" icon={<Layers className="size-3.5" />}>
+                    <ul className="divide-y divide-slate-100 text-xs">
+                        {result.chipboard.map((c) => (
+                            <li key={c.name} className="flex items-center justify-between gap-2 py-1.5">
+                                <span className="text-slate-600">{c.name}</span>
+                                <span className="flex items-center gap-2 font-semibold text-slate-900 tabular-nums">
+                                    {c.width} × {c.height}
+                                    <span className="rounded-md bg-slate-100 px-1.5 py-px text-[10px] font-bold text-slate-500">×{c.quantity}</span>
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                </Card>
             )}
 
             {sheet && (
                 <button
                     type="button"
                     onClick={() => downloadText(dielineFileName(params), dielineToSvg(sheet, { params: params ?? undefined }))}
-                    className="flex items-center justify-center gap-2 rounded-md border border-slate-200 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                    className="group flex shrink-0 items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-3 text-left transition hover:border-violet-300 hover:shadow-md hover:shadow-violet-100"
                 >
-                    <Download className="size-4" />
-                    Download dieline (SVG)
+                    <span className="flex size-10 items-center justify-center rounded-xl bg-slate-900 text-white transition group-hover:bg-violet-600">
+                        <Scissors className="size-4" />
+                    </span>
+                    <span className="flex-1">
+                        <span className="block text-sm font-semibold text-slate-900">Download dieline</span>
+                        <span className="block text-[11px] text-slate-500">Layered SVG · cut, crease, bleed, safe</span>
+                    </span>
+                    <Download className="size-4 text-slate-400 transition group-hover:text-violet-600" />
                 </button>
             )}
         </aside>
@@ -200,7 +247,7 @@ function toHexColor(color: string): string {
 
 function Legend({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
     return (
-        <span className="flex items-center gap-1">
+        <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
             <span className="inline-block w-4 border-t-2" style={{ borderColor: color, borderStyle: dashed ? 'dashed' : 'solid' }} />
             {label}
         </span>

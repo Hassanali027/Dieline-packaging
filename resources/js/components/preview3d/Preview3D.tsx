@@ -102,10 +102,10 @@ export default function Preview3D({
                 dpr={[1, 2]}
                 camera={{ fov: 35, near: 1, far: extent * 50, position: [extent, extent, extent * 2] }}
                 onPointerMissed={() => onSelectPanel?.(null)}
-                gl={{ preserveDrawingBuffer: true, antialias: true }}
+                gl={{ preserveDrawingBuffer: true, antialias: true, alpha: true }}
             >
-                <color attach="background" args={['#f1f5f9']} />
-                <hemisphereLight args={['#ffffff', '#cbd5e1', 0.9]} />
+                {/* Transparent: the studio gradient behind the canvas is CSS (.editor-studio). */}
+                <hemisphereLight args={['#ffffff', '#4c4f72', 1.1]} />
                 <directionalLight
                     position={[extent, extent * 2, extent * 1.5]}
                     intensity={1.6}
@@ -137,7 +137,7 @@ export default function Preview3D({
                         />
                     ))}
 
-                <ContactShadows position={[0, -0.5, 0]} scale={extent * 6} far={extent} blur={2.5} opacity={0.35} resolution={512} />
+                <ContactShadows position={[0, -0.5, 0]} scale={extent * 6} far={extent} blur={2.5} opacity={0.65} resolution={512} />
                 <OrbitControls makeDefault enableDamping minDistance={extent * 0.6} maxDistance={extent * 8} />
                 {size && <CameraRig preset={cameraPreset} size={size} />}
             </Canvas>

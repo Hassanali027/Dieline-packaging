@@ -162,7 +162,8 @@ export default function SelectionToolbar({ controller }: { controller: RefObject
     const dpi = single?.type === 'image' ? imageDpi(single) : null;
 
     return (
-        <div className="pointer-events-auto flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur">
+        // One scrollable row on a narrow canvas; wraps into centred rows once the canvas is roomy.
+        <div className="editor-glass pointer-events-auto flex max-w-full flex-nowrap items-center gap-1.5 overflow-x-auto rounded-2xl border border-white/60 px-2.5 py-2 shadow-xl ring-1 shadow-slate-900/10 ring-slate-900/5 [scrollbar-width:thin] @2xl:max-w-[46rem] @2xl:flex-wrap @2xl:justify-center @2xl:overflow-visible [&>*]:shrink-0">
             {isText && single && (
                 <>
                     <select

@@ -32,6 +32,8 @@ const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 40;
 /** Empty space kept around the bleed when fitting, in mm. */
 const FIT_MARGIN_MM = 12;
+/** Screen space reserved for the overlays when fitting, in CSS px. */
+const FIT_INSET_PX = { top: 64, bottom: 84, side: 24 };
 
 const COLORS = {
     cut: '#0f172a',
@@ -126,8 +128,19 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
         const cw = canvas.getWidth();
         const ch = canvas.getHeight();
         if (!cw || !ch) return;
-        const zoom = Math.min(cw / w, ch / h);
-        canvas.setViewportTransform([zoom, 0, 0, zoom, (cw - dieline.overallSize.width * zoom) / 2, (ch - dieline.overallSize.height * zoom) / 2]);
+        // Keep the sheet clear of the floating controls (view pill on top, toolbars at the bottom).
+        const top = Math.min(FIT_INSET_PX.top, ch * 0.15);
+        const bottom = Math.min(FIT_INSET_PX.bottom, ch * 0.2);
+        const side = Math.min(FIT_INSET_PX.side, cw * 0.05);
+        const zoom = Math.max(MIN_ZOOM, Math.min((cw - 2 * side) / w, (ch - top - bottom) / h));
+        canvas.setViewportTransform([
+            zoom,
+            0,
+            0,
+            zoom,
+            (cw - dieline.overallSize.width * zoom) / 2,
+            top + (ch - top - bottom - dieline.overallSize.height * zoom) / 2,
+        ]);
         canvas.requestRenderAll();
         emitZoom();
     }, [emitZoom]);
@@ -195,7 +208,8 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
         if (!el || !container) return;
 
         const canvas = new Canvas(el, {
-            backgroundColor: '#e2e8f0',
+            // Transparent: the dotted drafting grid behind the canvas is CSS (.editor-grid).
+            backgroundColor: '',
             preserveObjectStacking: true,
             selection: true,
             fireMiddleClick: true,

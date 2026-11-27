@@ -1,9 +1,10 @@
 import { ApiError, saveDesign } from '@/lib/api';
+import { replaceUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
 import type { Design } from '@/types/design';
 import { Check, Loader2, Save } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 
 /**
  * Saving (Dev 2 UI on Dev 4's /api/designs):
@@ -44,11 +45,11 @@ export function draftHasWork(draft: Draft): boolean {
 function setDesignInUrl(id: number) {
     const url = new URL(window.location.href);
     url.searchParams.set('design', String(id));
-    window.history.replaceState(window.history.state, '', url);
+    replaceUrl(url);
 }
 
 /** `autosave` is off while the restore-draft banner is open, so the old draft is not overwritten. */
-export default function SaveControls({ defaultName, autosave = true }: { defaultName: string; autosave?: boolean }) {
+export default function SaveControls({ defaultName, autosave = true, children }: { defaultName: string; autosave?: boolean; children?: ReactNode }) {
     const design = useEditorStore((s) => s.design);
     const meta = useEditorStore((s) => s.designMeta);
     const setDesignMeta = useEditorStore((s) => s.setDesignMeta);
@@ -103,35 +104,43 @@ export default function SaveControls({ defaultName, autosave = true }: { default
     const label =
         status === 'saving' ? 'Saving…' : status === 'error' ? 'Not saved' : dirty ? (designId ? 'Unsaved changes' : 'Not saved yet') : 'Saved';
 
+    const tone = status === 'error' ? 'error' : dirty ? 'dirty' : 'saved';
+
     return (
-        <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-slate-200 bg-white/95 px-2 py-1 shadow-xs backdrop-blur">
-            <input
-                value={name}
-                onChange={(e) => setDesignMeta({ name: e.target.value })}
-                aria-label="Design name"
-                maxLength={120}
-                className="w-40 rounded px-1.5 py-1 text-xs font-medium text-slate-800 outline-none hover:bg-slate-50 focus:bg-slate-50"
-            />
-            <span
-                title={error ?? undefined}
-                className={cn(
-                    'flex items-center gap-1 text-[11px] whitespace-nowrap',
-                    status === 'error' ? 'text-rose-600' : dirty ? 'text-amber-600' : 'text-emerald-600',
-                )}
-            >
-                {!dirty && status !== 'error' && <Check className="size-3" />}
-                {label}
-            </span>
-            <button
-                type="button"
-                onClick={() => void save()}
-                disabled={status === 'saving'}
-                title="Save (Ctrl+S)"
-                className="flex items-center gap-1.5 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-60"
-            >
-                {status === 'saving' ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                Save
-            </button>
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-4">
+            {/* Design name, edited in place, with its save state underneath. */}
+            <div className="flex min-w-0 flex-col">
+                <input
+                    value={name}
+                    onChange={(e) => setDesignMeta({ name: e.target.value })}
+                    aria-label="Design name"
+                    maxLength={120}
+                    className="w-64 max-w-full truncate rounded-md bg-transparent px-1.5 py-0.5 text-sm font-semibold text-slate-900 outline-none hover:bg-slate-100 focus:bg-slate-100"
+                />
+                <span title={error ?? undefined} className="flex items-center gap-1.5 px-1.5 text-[11px] whitespace-nowrap text-slate-500">
+                    <span
+                        className={cn(
+                            'inline-block size-1.5 rounded-full',
+                            tone === 'error' ? 'bg-rose-500' : tone === 'dirty' ? 'bg-amber-500' : 'bg-emerald-500',
+                        )}
+                    />
+                    {label}
+                    {status === 'saving' && <Loader2 className="size-3 animate-spin" />}
+                </span>
+            </div>
+            <div className="flex items-center gap-2">
+                {children}
+                <button
+                    type="button"
+                    onClick={() => void save()}
+                    disabled={status === 'saving'}
+                    title="Save (Ctrl+S)"
+                    className="flex h-9 items-center gap-2 rounded-xl bg-gradient-to-b from-violet-500 to-violet-700 px-4 text-sm font-semibold text-white shadow-[0_1px_0_rgba(255,255,255,0.25)_inset,0_6px_16px_-6px_rgba(109,40,217,0.7)] transition hover:from-violet-500 hover:to-violet-600 disabled:opacity-60"
+                >
+                    {tone === 'saved' && status !== 'saving' ? <Check className="size-4" /> : <Save className="size-4" />}
+                    Save
+                </button>
+            </div>
         </div>
     );
 }
@@ -140,11 +149,11 @@ export default function SaveControls({ defaultName, autosave = true }: { default
 export function DraftBanner({ draft, onRestore, onDiscard }: { draft: Draft; onRestore: () => void; onDiscard: () => void }) {
     const when = new Date(draft.savedAt);
     return (
-        <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow-xs">
+        <div className="editor-glass pointer-events-auto flex items-center gap-3 rounded-2xl border border-amber-200/80 px-3.5 py-2.5 text-xs text-amber-900 shadow-lg shadow-amber-900/5">
             <span>
                 You have an unsaved draft from {when.toLocaleDateString()} {when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
             </span>
-            <button type="button" onClick={onRestore} className="rounded bg-amber-600 px-2 py-1 font-medium text-white hover:bg-amber-700">
+            <button type="button" onClick={onRestore} className="rounded-lg bg-amber-500 px-2.5 py-1 font-semibold text-white hover:bg-amber-600">
                 Restore
             </button>
             <button type="button" onClick={onDiscard} className="rounded px-2 py-1 font-medium hover:bg-amber-100">

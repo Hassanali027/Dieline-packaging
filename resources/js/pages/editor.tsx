@@ -1,17 +1,18 @@
 import { ElementsPanel, TextPanel, UploadsPanel } from '@/components/editor/AddPanels';
-import BottomToolbar from '@/components/editor/BottomToolbar';
 import BoxSettings from '@/components/editor/BoxSettings';
 import DielineCanvas, { type CanvasController } from '@/components/editor/DielineCanvas';
+import EditorHeader from '@/components/editor/EditorHeader';
 import EditorSidebar from '@/components/editor/EditorSidebar';
 import RightPanel from '@/components/editor/RightPanel';
-import SaveControls, { clearDraft, DraftBanner, draftHasWork, readDraft, type Draft } from '@/components/editor/SaveControls';
+import { clearDraft, DraftBanner, draftHasWork, readDraft, type Draft } from '@/components/editor/SaveControls';
 import SelectionToolbar from '@/components/editor/SelectionToolbar';
-import ShareDialog from '@/components/editor/ShareDialog';
 import type { ProductItem } from '@/components/editor/types';
+import ZoomControls from '@/components/editor/ZoomControls';
 import { useDieline } from '@/hooks/use-dieline';
 import { useSheetTextures, type SheetSurface } from '@/hooks/use-sheet-textures';
 import type { SavedDesign } from '@/lib/api';
 import { extractPart } from '@/lib/dieline';
+import { replacePath, replaceUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
 import type { Design, DesignPartKey, DielineResult } from '@/types/design';
@@ -34,6 +35,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     const [readOnly, setReadOnly] = useState(!!sharedDesign);
     const setSource = useEditorStore((s) => s.setSource);
     const activeSide = useEditorStore((s) => s.activeSide);
+    const setActiveSide = useEditorStore((s) => s.setActiveSide);
     const material = useEditorStore((s) => s.design.material);
     const faceColors = useEditorStore((s) => s.design.faceColors);
     const selectedPanelId = useEditorStore((s) => s.selectedPanelId);
@@ -85,9 +87,15 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
         return draft && draftHasWork(draft) ? draft : null;
     });
 
+    // The box being designed right now. The URL's product is only the starting point: picking
+    // another style, opening a saved design or restoring a draft can change it.
+    const currentProduct = products.find((p) => p.style === params?.style) ?? activeProduct;
+
     const pickProduct = (product: ProductItem) => {
         setSelectedPanelId(null);
         setSource({ kind: 'parametric', params: product.default_params });
+        // Keep the address in step (a reload reopens this style); ?design= stays as it is.
+        replacePath(`/editor/${product.slug}`);
     };
 
     // Open the saved design from ?design=, otherwise the product from the URL (/editor/{slug}),
@@ -111,7 +119,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     const editCopy = () => {
         setReadOnly(false);
         useEditorStore.getState().setDesignMeta({ id: null, name: 'Copy of shared design', baseline: null });
-        window.history.replaceState(window.history.state, '', `/editor/${activeProduct?.slug ?? ''}`);
+        replaceUrl(`/editor/${currentProduct?.slug ?? ''}`);
     };
 
     const restoreDraft = () => {
@@ -149,21 +157,29 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
 
     return (
         <>
-            <Head title={activeProduct ? `${activeProduct.name} — Dieline Editor` : 'Dieline Editor'} />
-            <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-900">
-                <div className={cn('flex h-full', readOnly && 'pointer-events-none opacity-50')} aria-disabled={readOnly}>
-                    <EditorSidebar
-                        panels={{
-                            box: <BoxSettings products={products} params={params} errors={errors} onPickProduct={pickProduct} />,
-                            uploads: <UploadsPanel sheet={sheet} />,
-                            elements: <ElementsPanel sheet={sheet} />,
-                            text: <TextPanel sheet={sheet} />,
-                        }}
-                    />
-                </div>
+            <Head title={currentProduct ? `${currentProduct.name} — Dieline Editor` : 'Dieline Editor'} />
+            <div className="flex h-screen w-screen flex-col overflow-hidden bg-slate-100 text-slate-900">
+                <EditorHeader
+                    productName={currentProduct?.name ?? 'Box'}
+                    defaultName={`${currentProduct?.name ?? 'Box'} design`}
+                    autosave={!draftOffer}
+                    readOnly={readOnly}
+                    onEditCopy={editCopy}
+                />
 
-                <main className="relative flex min-w-0 flex-1 flex-col">
-                    <div className="relative flex-1">
+                <div className="flex min-h-0 flex-1">
+                    <div className={cn('flex h-full', readOnly && 'pointer-events-none opacity-50')} aria-disabled={readOnly}>
+                        <EditorSidebar
+                            panels={{
+                                box: <BoxSettings products={products} params={params} errors={errors} onPickProduct={pickProduct} />,
+                                uploads: <UploadsPanel sheet={sheet} />,
+                                elements: <ElementsPanel sheet={sheet} />,
+                                text: <TextPanel sheet={sheet} />,
+                            }}
+                        />
+                    </div>
+
+                    <main className="editor-grid @container relative min-w-0 flex-1 overflow-hidden">
                         <DielineCanvas
                             result={sheetResult}
                             side={activeSide}
@@ -174,77 +190,93 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
                             onZoomChange={setZoom}
                             controllerRef={controller}
                         />
-                        {/* One top bar: view + part tabs on the left, saving on the right; wraps on narrow screens. */}
-                        <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex flex-wrap items-start justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                                <span className="rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-600 capitalize shadow-xs">
-                                    {activeSide} view
-                                </span>
+
+                        {/* Canvas overlay: which sheet is shown (side, part) on the left, draft notice on the right. */}
+                        <div className="pointer-events-none absolute inset-x-4 top-4 z-20 flex flex-wrap items-start justify-between gap-2">
+                            <div className="editor-glass pointer-events-auto flex max-w-full flex-wrap items-center gap-1 rounded-2xl border border-white/60 p-1 shadow-lg ring-1 shadow-slate-900/10 ring-slate-900/5">
+                                <Segmented
+                                    label="Printed side"
+                                    value={activeSide}
+                                    options={[
+                                        { value: 'outside', label: 'Outside' },
+                                        { value: 'inside', label: 'Inside' },
+                                    ]}
+                                    onChange={(v) => setActiveSide(v as typeof activeSide)}
+                                />
                                 {parts.length > 0 && (
-                                    <div
-                                        className="pointer-events-auto flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-xs"
-                                        role="tablist"
-                                        aria-label="Box part"
-                                    >
-                                        {parts.map((p) => (
-                                            <button
-                                                key={p}
-                                                type="button"
-                                                role="tab"
-                                                aria-selected={activePart === p}
-                                                onClick={() => setActivePart(p)}
-                                                className={cn(
-                                                    'rounded-md px-3 py-1 text-xs font-medium',
-                                                    activePart === p ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100',
-                                                )}
-                                            >
-                                                {PART_LABELS[p] ?? p}
-                                            </button>
-                                        ))}
-                                    </div>
+                                    <>
+                                        <div className="mx-1 h-6 w-px bg-slate-200" />
+                                        <Segmented
+                                            label="Box part"
+                                            value={activePart ?? ''}
+                                            options={parts.map((p) => ({ value: p, label: PART_LABELS[p] ?? p }))}
+                                            onChange={(v) => setActivePart(v as DesignPartKey)}
+                                        />
+                                    </>
                                 )}
                             </div>
-                            <div className="ml-auto flex flex-col items-end gap-2">
-                                {readOnly ? (
-                                    <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-900 shadow-xs">
-                                        Shared design · view only
-                                        <button
-                                            type="button"
-                                            onClick={editCopy}
-                                            className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
-                                        >
-                                            Edit a copy
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-start gap-2">
-                                        <ShareDialog />
-                                        <SaveControls defaultName={`${activeProduct?.name ?? 'Box'} design`} autosave={!draftOffer} />
-                                    </div>
-                                )}
-                                {draftOffer && <DraftBanner draft={draftOffer} onRestore={restoreDraft} onDiscard={discardDraft} />}
-                            </div>
+                            {draftOffer && <DraftBanner draft={draftOffer} onRestore={restoreDraft} onDiscard={discardDraft} />}
                         </div>
+
                         {readOnly && <div className="absolute inset-0 z-10" aria-hidden onPointerDown={(e) => e.stopPropagation()} />}
                         {canvasNotice && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-slate-100/80">
-                                <div className="rounded-xl border border-slate-200 bg-white px-6 py-5 text-center text-sm text-slate-600 shadow-sm">
-                                    {canvasNotice}
-                                    <div className="mt-1 text-xs text-slate-400">
+                            <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100/70 backdrop-blur-[2px]">
+                                <div className="max-w-sm rounded-3xl border border-slate-200 bg-white px-7 py-6 text-center shadow-xl shadow-slate-900/5">
+                                    <div className="text-sm font-semibold text-slate-900">{canvasNotice}</div>
+                                    <div className="mt-1.5 text-xs leading-relaxed text-slate-500">
                                         Folding styles (Mailer, Tuck, Burger, Tray, Sleeve) and Rigid Lid & Base work today.
                                     </div>
                                 </div>
                             </div>
                         )}
-                    </div>
-                    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2">
-                        {!readOnly && <SelectionToolbar controller={controller} />}
-                        <BottomToolbar controller={controller} zoom={zoom} />
-                    </div>
-                </main>
 
-                <RightPanel result={result} sheetResult={sheetResult} params={params} textures={textures} />
+                        <div className="pointer-events-none absolute inset-x-4 bottom-[4.5rem] z-20 flex justify-center">
+                            {!readOnly && <SelectionToolbar controller={controller} />}
+                        </div>
+                        <div className="pointer-events-none absolute right-4 bottom-5 z-20">
+                            <ZoomControls controller={controller} zoom={zoom} />
+                        </div>
+                        <div className="pointer-events-none absolute bottom-6 left-4 z-10 hidden text-[11px] text-slate-400 xl:block">
+                            Scroll to zoom · Space + drag to pan
+                        </div>
+                    </main>
+
+                    <RightPanel result={result} sheetResult={sheetResult} params={params} textures={textures} />
+                </div>
             </div>
         </>
+    );
+}
+
+/** Pill-style segmented control used on the canvas overlay. */
+function Segmented({
+    label,
+    value,
+    options,
+    onChange,
+}: {
+    label: string;
+    value: string;
+    options: { value: string; label: string }[];
+    onChange: (v: string) => void;
+}) {
+    return (
+        <div role="tablist" aria-label={label} className="flex gap-0.5">
+            {options.map((o) => (
+                <button
+                    key={o.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={value === o.value}
+                    onClick={() => onChange(o.value)}
+                    className={cn(
+                        'rounded-xl px-3.5 py-1.5 text-xs font-semibold transition',
+                        value === o.value ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-900/5 hover:text-slate-900',
+                    )}
+                >
+                    {o.label}
+                </button>
+            ))}
+        </div>
     );
 }

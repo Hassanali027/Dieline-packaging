@@ -140,6 +140,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     // Ctrl/Cmd + Z / Y (Shift+Z) for undo / redo, ignored while typing in a field or editing canvas text.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
+            if (readOnly) return;
             const el = document.activeElement as HTMLElement | null;
             const tag = (el?.tagName ?? '').toLowerCase();
             if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable || controller.current?.isEditingText()) return;
@@ -156,7 +157,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, []);
+    }, [readOnly]);
 
     // When the dieline cannot be built, keep the canvas showing the last good one.
     const canvasNotice = !supported && params ? `The ${params.style} dieline is coming in a later sprint.` : null;
@@ -196,6 +197,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
                             onSelectPanel={setSelectedPanelId}
                             onZoomChange={setZoom}
                             controllerRef={controller}
+                            readOnly={readOnly}
                         />
 
                         {/* Canvas overlay: which sheet is shown (side, part) on the left, draft notice on the right. */}

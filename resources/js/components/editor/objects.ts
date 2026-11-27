@@ -307,6 +307,7 @@ export function makeImage(asset: UploadedImage, natural: { width: number; height
         props: {
             src: asset.url,
             assetId: asset.id,
+            ...(asset.name ? { name: asset.name } : {}),
             naturalWidth: natural.width,
             naturalHeight: natural.height,
             left: sheet.width / 2,
@@ -374,13 +375,16 @@ export const MIN_PRINT_DPI = 300;
 /** Critical print resolution threshold below which raster images look visibly pixelated. */
 export const LOW_PRINT_DPI = 150;
 
-/** Effective print resolution of an image at its current size on the sheet. */
+/** Effective print resolution of an image at its current size on the sheet (worst axis). */
 export function imageDpi(obj: CanvasObject): number | null {
     if (obj.type !== 'image') return null;
     const naturalWidth = num(obj.props.naturalWidth, 0);
-    const widthMm = objectSize(obj).width;
-    if (!naturalWidth || !widthMm) return null;
-    return Math.round(naturalWidth / (widthMm / 25.4));
+    const naturalHeight = num(obj.props.naturalHeight, 0);
+    const size = objectSize(obj);
+    if (!naturalWidth || !size.width) return null;
+    const dpiX = naturalWidth / (size.width / 25.4);
+    const dpiY = naturalHeight && size.height ? naturalHeight / (size.height / 25.4) : dpiX;
+    return Math.round(Math.min(dpiX, dpiY));
 }
 
 /** All raster images on a surface whose effective DPI is below `MIN_PRINT_DPI`. */

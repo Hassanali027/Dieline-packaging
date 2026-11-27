@@ -28,6 +28,7 @@ type Props = {
     onSelectPanel: (id: string | null) => void;
     onZoomChange?: (zoom: number) => void;
     controllerRef?: Ref<CanvasController>;
+    readOnly?: boolean;
 };
 
 const MIN_ZOOM = 0.05;
@@ -56,7 +57,17 @@ const isTyping = () => {
     return tag === 'input' || tag === 'textarea' || tag === 'select' || !!el?.isContentEditable;
 };
 
-export default function DielineCanvas({ result, side, material, faceColors, selectedPanelId, onSelectPanel, onZoomChange, controllerRef }: Props) {
+export default function DielineCanvas({
+    result,
+    side,
+    material,
+    faceColors,
+    selectedPanelId,
+    onSelectPanel,
+    onZoomChange,
+    controllerRef,
+    readOnly = false,
+}: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasElRef = useRef<HTMLCanvasElement>(null);
     const canvasRef = useRef<Canvas | null>(null);
@@ -64,8 +75,10 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
     const fittedFor = useRef<string | null>(null);
     const onSelectPanelRef = useRef(onSelectPanel);
     const onZoomChangeRef = useRef(onZoomChange);
+    const readOnlyRef = useRef(readOnly);
     onSelectPanelRef.current = onSelectPanel;
     onZoomChangeRef.current = onZoomChange;
+    readOnlyRef.current = readOnly;
 
     // User objects: the store is the source of truth, Fabric shows it.
     const activePart = useEditorStore((s) => s.activePart);
@@ -280,6 +293,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
                 e.preventDefault();
                 return;
             }
+            if (readOnlyRef.current) return;
             const store = useEditorStore.getState();
             const ids = store.selectedObjectIds;
             const mod = e.ctrlKey || e.metaKey;
@@ -292,7 +306,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             if (!ids.length) return;
             const list = surfaceObjects(store.design, store.activePart, sideRef.current);
             const unlockedIds = ids.filter((id) => !list.find((o) => o.id === id)?.locked);
-            if (e.key.startsWith('Arrow')) {
+            if (e.key.startsWith('Arrow') && !mod && !e.altKey) {
                 // Nudge 1 mm, or 10 mm with Shift.
                 const step = e.shiftKey ? 10 : 1;
                 const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
@@ -450,30 +464,34 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
                   )
             : [];
 
+        const hasInteractiveUploadedLines = source.kind === 'uploaded-dieline' && !!source.lines?.length;
         const lines = [
             new Path(path(result.bleedPath), { ...lineStyle, stroke: COLORS.bleed, strokeWidth: 1, strokeDashArray: [6, 4] }),
             new Path(path(result.safePath), { ...lineStyle, stroke: COLORS.safe, strokeWidth: 0.75, strokeDashArray: [2, 3] }),
-            new Path(path(result.cutPath), { ...lineStyle, stroke: COLORS.cut, strokeWidth: 1.25 }),
-            ...result.creasePaths.map((d) => new Path(path(d), { ...lineStyle, stroke: COLORS.crease, strokeWidth: 1, strokeDashArray: [5, 4] })),
+            ...(!hasInteractiveUploadedLines
+                ? [
+                      new Path(path(result.cutPath), { ...lineStyle, stroke: COLORS.cut, strokeWidth: 1.25 }),
+                      ...result.creasePaths.map((d) => new Path(path(d), { ...lineStyle, stroke: COLORS.crease, strokeWidth: 1, strokeDashArray: [5, 4] })),
+                  ]
+                : []),
         ];
 
-        const uploadedLines =
-            source.kind === 'uploaded-dieline' && source.lines?.length
-                ? source.lines.map((l) =>
-                      Object.assign(
-                          new Path(path(l.path), {
-                              ...locked,
-                              fill: '',
-                              evented: lineTaggingMode,
-                              hoverCursor: lineTaggingMode ? 'pointer' : 'default',
-                              stroke: l.tag === 'cut' ? COLORS.cut : COLORS.crease,
-                              strokeWidth: lineTaggingMode ? 2.2 : 1.25,
-                              strokeDashArray: l.tag === 'fold' ? [5, 4] : null,
-                          }),
-                          { taggedLineId: l.id, taggedLineTag: l.tag },
-                      ),
-                  )
-                : [];
+        const uploadedLines = hasInteractiveUploadedLines
+            ? source.lines!.map((l) =>
+                  Object.assign(
+                      new Path(path(l.path), {
+                          ...locked,
+                          fill: '',
+                          evented: lineTaggingMode,
+                          hoverCursor: lineTaggingMode ? 'pointer' : 'default',
+                          stroke: l.tag === 'cut' ? COLORS.cut : COLORS.crease,
+                          strokeWidth: lineTaggingMode ? 2.2 : 1.25,
+                          strokeDashArray: l.tag === 'fold' ? [5, 4] : null,
+                      }),
+                      { taggedLineId: l.id, taggedLineTag: l.tag },
+                  ),
+              )
+            : [];
 
         // Panels stay separate objects so they can be clicked; the line work is one non-interactive group.
         const linesGroup = new Group([...turnInShades, ...lines], { ...locked, evented: false, subTargetCheck: false });

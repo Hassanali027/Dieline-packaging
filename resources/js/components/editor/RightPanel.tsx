@@ -234,7 +234,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                                         dpi < LOW_PRINT_DPI ? 'border-rose-200 bg-rose-50/60 text-rose-800' : 'border-amber-200 bg-amber-50/60 text-amber-800',
                                     )}
                                 >
-                                    <span className="truncate font-medium">Image {idx + 1}</span>
+                                    <span className="truncate font-medium">{String(object.props.name || `Image ${idx + 1}`)}</span>
                                     <span className="font-bold tabular-nums">{dpi} DPI</span>
                                 </button>
                             </li>

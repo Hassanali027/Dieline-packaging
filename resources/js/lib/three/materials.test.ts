@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import foldMappingSource from './foldMapping.ts?raw';
 import { MATERIAL_OPTIONS, materialColor, resolveFinishProps } from './materials';
+import materialsSource from './materials.ts?raw';
 
 describe('3D materials and finishes', () => {
+    it('keeps Three.js out of the lib/three files the 2D editor imports eagerly', () => {
+        // Otherwise the production build drops pages/editor.tsx from the Vite manifest (500 on /editor).
+        expect(materialsSource).not.toMatch(/from ['"]three['"]/);
+        expect(foldMappingSource).not.toMatch(/from ['"]three['"]/);
+    });
+
     it('exposes folding and rigid wrap-paper material options', () => {
         const values = MATERIAL_OPTIONS.map((o) => o.value);
         expect(values).toEqual(expect.arrayContaining(['white', 'kraft', 'transparent', 'wrap-paper', 'linen', 'leatherette']));

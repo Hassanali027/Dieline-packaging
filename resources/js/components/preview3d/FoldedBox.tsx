@@ -91,11 +91,15 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
     const selected = props.selectedPanelId === node.panel.id;
     const faceColor = props.faceColors[node.panel.id];
     const translucent = props.transparent || props.xRay;
-    const transparency = props.xRay
-        ? { transparent: true, opacity: 0.28, depthWrite: false }
-        : props.transparent
-          ? { transparent: true, opacity: 0.45, depthWrite: false }
-          : {};
+    // Always pass all three values: R3F does not reset a prop that disappears, so spreading {}
+    // when X-Ray / Transparent is turned off left the box see-through.
+    const transparency = {
+        transparent: translucent,
+        opacity: props.xRay ? 0.28 : props.transparent ? 0.45 : 1,
+        depthWrite: !translucent,
+    };
+    // three.js compiles opaque materials with alpha forced to 1 and does not recompile when
+    // `transparent` flips, so the materials are remounted (key) when translucency changes.
     const highlight = { emissive: selected ? '#4f46e5' : '#000000', emissiveIntensity: selected ? 0.25 : 0 };
     const finish = props.finishProps;
     const outsideBaseColor = finish?.foilTint ?? faceColor ?? props.outsideColor;
@@ -114,6 +118,7 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
                 }}
             >
                 <meshStandardMaterial
+                    key={`m0-${translucent}`}
                     attach="material-0"
                     color={props.insideTexture ? '#ffffff' : props.insideColor}
                     map={props.insideTexture ?? null}
@@ -122,8 +127,16 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
                     {...transparency}
                     {...highlight}
                 />
-                <meshStandardMaterial attach="material-1" color={EDGE_COLOR} roughness={0.95} wireframe={props.xRay} {...transparency} />
+                <meshStandardMaterial
+                    key={`m1-${translucent}`}
+                    attach="material-1"
+                    color={EDGE_COLOR}
+                    roughness={0.95}
+                    wireframe={props.xRay}
+                    {...transparency}
+                />
                 <meshPhysicalMaterial
+                    key={`m2-${translucent}`}
                     attach="material-2"
                     color={props.outsideTexture ? (finish?.foilTint ?? '#ffffff') : outsideBaseColor}
                     map={props.outsideTexture ?? null}

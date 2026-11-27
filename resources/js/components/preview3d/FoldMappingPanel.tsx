@@ -1,4 +1,4 @@
-import { autoBuildFoldTreeFromBase, updatePanelFoldAngle } from '@/lib/three/foldTree';
+import { autoBuildFoldTreeFromBase, findBasePanel, updatePanelFoldAngle } from '@/lib/three/foldMapping';
 import type { Panel } from '@/types/design';
 import { GitBranch, RotateCw } from 'lucide-react';
 
@@ -18,8 +18,8 @@ export default function FoldMappingPanel({ panels, selectedPanelId, onSelectPane
         return <p className="text-xs text-slate-500">Upload a dieline to map base panel and fold angles.</p>;
     }
 
-    const basePanel = panels.find((p) => !p.parentId) ?? panels[0];
-    const children = panels.filter((p) => p.id !== basePanel.id);
+    const basePanel = findBasePanel(panels);
+    const children = panels.filter((p) => p.id !== basePanel?.id);
 
     const setBasePanel = (baseId: string) => {
         onChangePanels(autoBuildFoldTreeFromBase(panels, baseId));
@@ -30,7 +30,7 @@ export default function FoldMappingPanel({ panels, selectedPanelId, onSelectPane
         onChangePanels(
             autoBuildFoldTreeFromBase(
                 panels.map((p) => ({ ...p, foldAngle: 0 })),
-                basePanel.id,
+                basePanel?.id ?? panels[0].id,
                 90,
             ),
         );
@@ -56,10 +56,15 @@ export default function FoldMappingPanel({ panels, selectedPanelId, onSelectPane
             <label className="flex flex-col gap-1 text-[11px] font-medium text-slate-600">
                 Base (floor) panel
                 <select
-                    value={basePanel.id}
+                    value={basePanel?.id ?? ''}
                     onChange={(e) => setBasePanel(e.target.value)}
                     className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-900"
                 >
+                    {!basePanel && (
+                        <option value="" disabled>
+                            Choose the floor panel…
+                        </option>
+                    )}
                     {panels.map((p) => (
                         <option key={p.id} value={p.id}>
                             {p.name}

@@ -1,16 +1,18 @@
 import { ApiError, listUploads, MAX_UPLOAD_BYTES, UPLOAD_ACCEPT, uploadImage, type UploadedAsset } from '@/lib/api';
+import { ensureFont, FONT_COMBOS, QUICK_TEXTS } from '@/lib/fonts';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
 import { Circle, Loader2, Minus, Square, Triangle, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { makeImage, makeShape, makeText, type ShapeKind, type SheetFrame, type TextPreset } from './objects';
+import { makeImage, makeShape, makeText, makeTextWith, type ShapeKind, type SheetFrame, type TextPreset } from './objects';
 
 type PanelProps = { sheet: SheetFrame | null };
 
 function useAdd() {
     const side = useEditorStore((s) => s.activeSide);
     const addObject = useEditorStore((s) => s.addObject);
-    return { side, addObject };
+    const addObjects = useEditorStore((s) => s.addObjects);
+    return { side, addObject, addObjects };
 }
 
 /* ------------------------------------------------------------------ */
@@ -24,7 +26,24 @@ const TEXT_BUTTONS: { preset: TextPreset; label: string; className: string }[] =
 ];
 
 export function TextPanel({ sheet }: PanelProps) {
-    const { side, addObject } = useAdd();
+    const { side, addObject, addObjects } = useAdd();
+
+    // Preview the combination fonts in the panel itself.
+    useEffect(() => {
+        FONT_COMBOS.forEach((c) => {
+            void ensureFont(c.heading);
+            void ensureFont(c.body);
+        });
+    }, []);
+
+    const addCombo = (combo: (typeof FONT_COMBOS)[number]) => {
+        if (!sheet) return;
+        addObjects(side, [
+            makeTextWith({ text: combo.headingText, fontSizePt: 34, fontFamily: combo.heading, fontWeight: 'normal', dy: -6 }, side, sheet),
+            makeTextWith({ text: combo.bodyText, fontSizePt: 12, fontFamily: combo.body, dy: 8 }, side, sheet),
+        ]);
+    };
+
     return (
         <div className="flex flex-col gap-2">
             {TEXT_BUTTONS.map((b) => (
@@ -41,7 +60,42 @@ export function TextPanel({ sheet }: PanelProps) {
                     {b.label}
                 </button>
             ))}
-            <p className="mt-2 text-xs text-slate-500">Double-click text on the canvas to edit it.</p>
+            <p className="text-xs text-slate-500">Double-click text on the canvas to edit it.</p>
+
+            <h3 className="mt-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">Font combinations</h3>
+            <div className="grid grid-cols-2 gap-2">
+                {FONT_COMBOS.map((c) => (
+                    <button
+                        key={c.heading}
+                        type="button"
+                        disabled={!sheet}
+                        onClick={() => addCombo(c)}
+                        className="rounded-lg border border-slate-200 px-2 py-2.5 text-center hover:bg-slate-50 disabled:opacity-40"
+                    >
+                        <div className="truncate text-base leading-tight text-slate-900" style={{ fontFamily: `"${c.heading}"` }}>
+                            {c.headingText}
+                        </div>
+                        <div className="truncate text-[10px] text-slate-500" style={{ fontFamily: `"${c.body}"` }}>
+                            {c.bodyText}
+                        </div>
+                    </button>
+                ))}
+            </div>
+
+            <h3 className="mt-3 text-xs font-semibold tracking-wide text-slate-500 uppercase">Quick text</h3>
+            <div className="flex flex-wrap gap-1.5">
+                {QUICK_TEXTS.map((t) => (
+                    <button
+                        key={t}
+                        type="button"
+                        disabled={!sheet}
+                        onClick={() => sheet && addObject(side, makeTextWith({ text: t, fontSizePt: 16, fontWeight: 'bold' }, side, sheet))}
+                        className="rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                        {t}
+                    </button>
+                ))}
+            </div>
         </div>
     );
 }

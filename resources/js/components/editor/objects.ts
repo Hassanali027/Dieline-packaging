@@ -1,3 +1,4 @@
+import { ALL_FONTS, ensureFont } from '@/lib/fonts';
 import { newObjectId, type BoxSide } from '@/store/useEditorStore';
 import type { CanvasObject } from '@/types/design';
 import { Ellipse, FabricImage, Group, Line, Rect, Textbox, Triangle, util, type FabricObject } from 'fabric';
@@ -16,7 +17,7 @@ export type BoundObject = FabricObject & { objectId?: string; propsKey?: string;
 /** 1 pt = 0.3528 mm; the toolbar shows pt, the canvas works in mm. */
 export const MM_PER_PT = 25.4 / 72;
 
-export const FONT_FAMILIES = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'Courier New', 'Verdana', 'Trebuchet MS', 'Impact'];
+export const FONT_FAMILIES = ALL_FONTS.map((f) => f.family);
 
 const TEXT_PRESETS: Record<TextPreset, { text: string; fontSizePt: number; fontWeight: string }> = {
     heading: { text: 'Your Heading', fontSizePt: 36, fontWeight: 'bold' },
@@ -88,6 +89,8 @@ export async function createFabricObject(obj: CanvasObject): Promise<BoundObject
     let fo: FabricObject | null = null;
 
     if (obj.type === 'text') {
+        // Web fonts must be loaded before Fabric measures the text.
+        await ensureFont(str(p.fontFamily, 'Arial'), str(p.fontWeight, 'normal'));
         fo = new Textbox(str(p.text, 'Text'), { ...commonOptions(obj), ...textOptions(obj) });
     } else if (obj.type === 'shape') {
         const kind = str(p.shape, 'rect') as ShapeKind;
@@ -228,6 +231,14 @@ export type SheetFrame = { width: number; height: number };
 
 export function makeText(preset: TextPreset, side: BoxSide, sheet: SheetFrame): CanvasObject {
     const t = TEXT_PRESETS[preset];
+    return makeTextWith({ text: t.text, fontSizePt: t.fontSizePt, fontWeight: t.fontWeight }, side, sheet);
+}
+
+export type TextSpec = { text: string; fontSizePt: number; fontWeight?: string; fontFamily?: string; dy?: number };
+
+/** A text object centred on the sheet (`dy` moves it down, mm). */
+export function makeTextWith(spec: TextSpec, side: BoxSide, sheet: SheetFrame): CanvasObject {
+    const t = { fontWeight: 'normal', fontFamily: 'Arial', dy: 0, ...spec };
     return {
         id: newObjectId(),
         type: 'text',
@@ -236,13 +247,13 @@ export function makeText(preset: TextPreset, side: BoxSide, sheet: SheetFrame): 
             text: t.text,
             fontSize: t.fontSizePt * MM_PER_PT,
             fontWeight: t.fontWeight,
-            fontFamily: 'Arial',
+            fontFamily: t.fontFamily,
             fontStyle: 'normal',
             textAlign: 'center',
             fill: '#0f172a',
             width: Math.min(sheet.width * 0.5, Math.max(40, t.text.length * t.fontSizePt * MM_PER_PT * 0.6)),
             left: sheet.width / 2,
-            top: sheet.height / 2,
+            top: sheet.height / 2 + t.dy,
             angle: 0,
             scaleX: 1,
             scaleY: 1,

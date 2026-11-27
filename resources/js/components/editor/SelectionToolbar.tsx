@@ -1,5 +1,6 @@
+import { ensureFont, GOOGLE_FONTS, SYSTEM_FONTS } from '@/lib/fonts';
 import { cn } from '@/lib/utils';
-import { useEditorStore, type ZOrderMove } from '@/store/useEditorStore';
+import { surfaceObjects, useEditorStore, type ZOrderMove } from '@/store/useEditorStore';
 import type { CanvasObject } from '@/types/design';
 import {
     AlignCenter,
@@ -21,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { CanvasController } from './DielineCanvas';
-import { FONT_FAMILIES, imageDpi, MIN_PRINT_DPI, MM_PER_PT, objectSize, scaleForSize } from './objects';
+import { imageDpi, MIN_PRINT_DPI, MM_PER_PT, objectSize, scaleForSize } from './objects';
 
 const round = (v: number, p = 1) => Math.round(v * 10 ** p) / 10 ** p;
 
@@ -132,7 +133,7 @@ const Divider = () => <div className="mx-1 h-6 w-px bg-slate-200" />;
 export default function SelectionToolbar({ controller }: { controller: RefObject<CanvasController | null> }) {
     const side = useEditorStore((s) => s.activeSide);
     const selectedIds = useEditorStore((s) => s.selectedObjectIds);
-    const objects = useEditorStore((s) => s.design[s.activeSide]);
+    const objects = useEditorStore((s) => surfaceObjects(s.design, s.activePart, s.activeSide));
     const updateObjects = useEditorStore((s) => s.updateObjects);
     const removeObjects = useEditorStore((s) => s.removeObjects);
     const duplicateObjects = useEditorStore((s) => s.duplicateObjects);
@@ -167,14 +168,28 @@ export default function SelectionToolbar({ controller }: { controller: RefObject
                     <select
                         aria-label="Font"
                         value={String(p.fontFamily ?? 'Arial')}
-                        onChange={(e) => setOne(single, { fontFamily: e.target.value })}
+                        onChange={async (e) => {
+                            const family = e.target.value;
+                            // Load first so Fabric lays the text out with the real font.
+                            await ensureFont(family, String(p.fontWeight ?? 'normal'));
+                            setOne(single, { fontFamily: family });
+                        }}
                         className="h-7 rounded border border-slate-200 bg-white px-1 text-xs"
                     >
-                        {FONT_FAMILIES.map((f) => (
-                            <option key={f} value={f} style={{ fontFamily: f }}>
-                                {f}
-                            </option>
-                        ))}
+                        <optgroup label="Standard">
+                            {SYSTEM_FONTS.map((f) => (
+                                <option key={f.family} value={f.family}>
+                                    {f.family}
+                                </option>
+                            ))}
+                        </optgroup>
+                        <optgroup label="Google Fonts">
+                            {GOOGLE_FONTS.map((f) => (
+                                <option key={f.family} value={f.family}>
+                                    {f.family}
+                                </option>
+                            ))}
+                        </optgroup>
                     </select>
                     <NumberField
                         label="Size"
@@ -186,7 +201,11 @@ export default function SelectionToolbar({ controller }: { controller: RefObject
                     <IconButton
                         label="Bold"
                         active={String(p.fontWeight) === 'bold'}
-                        onClick={() => setOne(single, { fontWeight: p.fontWeight === 'bold' ? 'normal' : 'bold' })}
+                        onClick={async () => {
+                            const weight = p.fontWeight === 'bold' ? 'normal' : 'bold';
+                            await ensureFont(String(p.fontFamily ?? 'Arial'), weight);
+                            setOne(single, { fontWeight: weight });
+                        }}
                     >
                         <Bold className="size-4" />
                     </IconButton>

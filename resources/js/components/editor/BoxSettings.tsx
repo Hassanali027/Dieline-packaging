@@ -15,6 +15,14 @@ type Props = {
 
 type DimKey = 'length' | 'width' | 'depth' | 'thickness';
 
+type RigidKey = 'boardThickness' | 'turnIn' | 'lidDepth' | 'lidClearance';
+const RIGID_FIELDS: { key: RigidKey; label: string; fallback: (p: BoxParams) => number }[] = [
+    { key: 'boardThickness', label: 'Chipboard', fallback: (p) => p.thickness },
+    { key: 'turnIn', label: 'Turn-in', fallback: () => 18 },
+    { key: 'lidDepth', label: 'Lid depth', fallback: (p) => Math.round(p.depth / 2) },
+    { key: 'lidClearance', label: 'Clearance', fallback: () => 1.5 },
+];
+
 const FIELDS: { key: DimKey; label: string }[] = [
     { key: 'length', label: 'Length' },
     { key: 'width', label: 'Width' },
@@ -127,6 +135,26 @@ export default function BoxSettings({ products, params, errors, onPickProduct }:
                             />
                         ))}
                     </div>
+                    {params.construction === 'rigid' && (
+                        <>
+                            <h3 className="mt-4 mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">Rigid box</h3>
+                            <div className="grid grid-cols-2 gap-2">
+                                {RIGID_FIELDS.map((f) => (
+                                    <DimensionInput
+                                        key={f.key}
+                                        label={f.label}
+                                        value={Number(params.rigid?.[f.key] ?? f.fallback(params))}
+                                        unit={params.unit}
+                                        onCommit={(v) =>
+                                            updateParams({
+                                                rigid: { boardThickness: params.thickness, turnIn: 18, ...params.rigid, [f.key]: v },
+                                            })
+                                        }
+                                    />
+                                ))}
+                            </div>
+                        </>
+                    )}
                     {errors.length > 0 && (
                         <ul className="mt-2 space-y-1 rounded-md bg-rose-50 p-2 text-xs text-rose-700">
                             {errors.map((e) => (

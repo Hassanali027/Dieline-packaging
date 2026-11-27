@@ -67,6 +67,14 @@ export function saveDesign(id: number | null, name: string, data: Design): Promi
     });
 }
 
+export type ShareContact = { customer_name: string; customer_email: string; customer_phone: string };
+export type ShareLink = { token: string; url: string; expires_at: string };
+
+/** Freezes a copy of the design behind an expiring read-only link (/s/{token}). */
+export function createShare(design: Design, contact: ShareContact): Promise<{ data: ShareLink }> {
+    return api('/api/share', { method: 'POST', body: JSON.stringify({ ...contact, design }) });
+}
+
 export function uploadImage(file: File): Promise<{ data: UploadedAsset }> {
     const form = new FormData();
     form.append('file', file);

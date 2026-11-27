@@ -1,4 +1,5 @@
 import type { SheetTextures } from '@/hooks/use-sheet-textures';
+import { buildAssembly, type AssemblyPiece } from '@/lib/three/assembly';
 import { materialColor } from '@/lib/three/materials';
 import type { CameraPreset } from '@/store/useEditorStore';
 import type { BoxStyle, DielineResult } from '@/types/design';
@@ -57,6 +58,7 @@ function CameraRig({ preset, size }: { preset: CameraPreset; size: NonNullable<P
  * The inside sheet is drawn mirrored (as the editor shows it), so it is flipped back here.
  */
 function useSheetTexture(canvas: HTMLCanvasElement | null | undefined, version: number, mirrored: boolean) {
+    // (one texture per canvas; see PieceTextures for several printed parts)
     const texture = useMemo(() => {
         if (!canvas) return null;
         const t = new CanvasTexture(canvas);
@@ -90,8 +92,7 @@ export default function Preview3D({
     onSelectPanel,
 }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const outsideTexture = useSheetTexture(textures?.outside, textures?.version ?? 0, false);
-    const insideTexture = useSheetTexture(textures?.inside, textures?.version ?? 0, true);
+    const pieces = useMemo(() => (result && size ? buildAssembly(style, result, progress, size.thickness) : []), [result, style, progress, size]);
     const extent = size ? Math.max(size.length, size.width, size.depth) : 200;
 
     return (
@@ -121,27 +122,66 @@ export default function Preview3D({
                 />
                 <directionalLight position={[-extent, extent, -extent]} intensity={0.4} />
 
-                {result && size && (
-                    <FoldedBox
-                        result={result}
-                        style={style}
-                        outsideTexture={outsideTexture}
-                        insideTexture={insideTexture}
-                        transparent={material === 'transparent'}
-                        progress={progress}
-                        thickness={size.thickness}
-                        outsideColor={materialColor(material, 'outside')}
-                        insideColor={materialColor(material, 'inside')}
-                        faceColors={faceColors}
-                        selectedPanelId={selectedPanelId}
-                        onSelectPanel={(id) => onSelectPanel?.(id)}
-                    />
-                )}
+                {size &&
+                    pieces.map((piece) => (
+                        <PieceBox
+                            key={piece.key}
+                            piece={piece}
+                            textures={textures?.surfaces[piece.key]}
+                            version={textures?.version ?? 0}
+                            thickness={size.thickness}
+                            material={material}
+                            faceColors={faceColors}
+                            selectedPanelId={selectedPanelId}
+                            onSelectPanel={onSelectPanel}
+                        />
+                    ))}
 
                 <ContactShadows position={[0, -0.5, 0]} scale={extent * 6} far={extent} blur={2.5} opacity={0.35} resolution={512} />
                 <OrbitControls makeDefault enableDamping minDistance={extent * 0.6} maxDistance={extent * 8} />
                 {size && <CameraRig preset={cameraPreset} size={size} />}
             </Canvas>
         </div>
+    );
+}
+
+/** One assembly piece with its own outside / inside sheet textures. */
+function PieceBox({
+    piece,
+    textures,
+    version,
+    thickness,
+    material,
+    faceColors,
+    selectedPanelId,
+    onSelectPanel,
+}: {
+    piece: AssemblyPiece;
+    textures?: { outside: HTMLCanvasElement | null; inside: HTMLCanvasElement | null };
+    version: number;
+    thickness: number;
+    material: string;
+    faceColors: Record<string, string>;
+    selectedPanelId: string | null;
+    onSelectPanel?: (id: string | null) => void;
+}) {
+    const outsideTexture = useSheetTexture(textures?.outside, version, false);
+    const insideTexture = useSheetTexture(textures?.inside, version, true);
+    return (
+        <FoldedBox
+            result={piece.result}
+            orientation={piece.orientation}
+            position={piece.position}
+            progress={piece.fold}
+            outsideTexture={outsideTexture}
+            insideTexture={insideTexture}
+            transparent={material === 'transparent'}
+            thickness={thickness}
+            outsideColor={materialColor(material, 'outside')}
+            insideColor={materialColor(material, 'inside')}
+            faceColors={faceColors}
+            selectedPanelId={selectedPanelId}
+            onSelectPanel={(id) => onSelectPanel?.(id)}
+        />
     );
 }

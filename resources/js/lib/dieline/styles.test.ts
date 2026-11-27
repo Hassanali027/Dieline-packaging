@@ -29,7 +29,7 @@ function pathToSegments(d: string): Segment[] {
 const length = (segs: Segment[]) => segs.reduce((s, x) => s + distance(x.a, x.b), 0);
 
 it('supports the six folding styles from Sprint 1', () => {
-    expect([...SUPPORTED_STYLES].sort()).toEqual(['burger', 'mailer', 'reverse-tuck', 'sleeve', 'straight-tuck', 'tray']);
+    expect([...SUPPORTED_STYLES].sort()).toEqual(['burger', 'mailer', 'reverse-tuck', 'rigid-lid-base', 'sleeve', 'straight-tuck', 'tray']);
 });
 
 describe.each(Object.keys(DEFAULTS))('%s', (style) => {

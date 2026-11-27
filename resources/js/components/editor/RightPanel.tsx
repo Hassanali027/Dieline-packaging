@@ -15,12 +15,16 @@ const Preview3D = lazy(() => import('@/components/preview3d/Preview3D'));
 const PRESETS: CameraPreset[] = ['front', 'back', 'left', 'right', 'top', 'bottom'];
 
 type Props = {
+    /** The whole box (all parts), for the 3D view. */
     result: DielineResult | null;
+    /** The sheet shown in the editor (the active part of a rigid box). */
+    sheetResult?: DielineResult | null;
     params: BoxParams | null;
     textures?: SheetTextures | null;
 };
 
-export default function RightPanel({ result, params, textures }: Props) {
+export default function RightPanel({ result, sheetResult, params, textures }: Props) {
+    const sheet = sheetResult ?? result;
     const activeSide = useEditorStore((s) => s.activeSide);
     const setActiveSide = useEditorStore((s) => s.setActiveSide);
     const foldProgress = useEditorStore((s) => s.foldProgress);
@@ -139,14 +143,14 @@ export default function RightPanel({ result, params, textures }: Props) {
                 )}
             </div>
 
-            {result && (
+            {sheet && (
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-500">
                     <dt>Sheet size</dt>
                     <dd className="text-right text-slate-700 tabular-nums">
-                        {Math.round(result.overallSize.width)} × {Math.round(result.overallSize.height)} mm
+                        {Math.round(sheet.overallSize.width)} × {Math.round(sheet.overallSize.height)} mm
                     </dd>
                     <dt>Panels</dt>
-                    <dd className="text-right text-slate-700">{result.panels.length}</dd>
+                    <dd className="text-right text-slate-700">{sheet.panels.length}</dd>
                     <dt className="col-span-2 mt-2 flex flex-wrap gap-3">
                         <Legend color="#0f172a" label="Cut" />
                         <Legend color="#e11d48" label="Crease" dashed />
@@ -156,10 +160,29 @@ export default function RightPanel({ result, params, textures }: Props) {
                 </dl>
             )}
 
-            {result && (
+            {result?.chipboard && (
+                <div className="rounded-lg border border-slate-200 p-3 text-[11px]">
+                    <div className="mb-1.5 font-semibold text-slate-700">Chipboard cutting list</div>
+                    <table className="w-full text-slate-600">
+                        <tbody>
+                            {result.chipboard.map((c) => (
+                                <tr key={c.name}>
+                                    <td className="py-0.5">{c.name}</td>
+                                    <td className="py-0.5 text-right tabular-nums">
+                                        {c.width} × {c.height} mm
+                                    </td>
+                                    <td className="py-0.5 pl-2 text-right tabular-nums">×{c.quantity}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {sheet && (
                 <button
                     type="button"
-                    onClick={() => downloadText(dielineFileName(params), dielineToSvg(result, { params: params ?? undefined }))}
+                    onClick={() => downloadText(dielineFileName(params), dielineToSvg(sheet, { params: params ?? undefined }))}
                     className="flex items-center justify-center gap-2 rounded-md border border-slate-200 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
                     <Download className="size-4" />

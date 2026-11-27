@@ -1,6 +1,6 @@
 import { BLEED_MM, mirrorPathX, mirrorPolygonX } from '@/lib/dieline';
 import { materialColor } from '@/lib/three/materials';
-import { useEditorStore, type BoxSide } from '@/store/useEditorStore';
+import { surfaceObjects, useEditorStore, type BoxSide } from '@/store/useEditorStore';
 import type { CanvasObject, DielineResult, Pt } from '@/types/design';
 import { ActiveSelection, Canvas, Group, Path, Point, Polygon, Textbox, type FabricObject, type TPointerEventInfo } from 'fabric';
 import { useCallback, useEffect, useImperativeHandle, useRef, type Ref } from 'react';
@@ -64,13 +64,15 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
     onZoomChangeRef.current = onZoomChange;
 
     // User objects: the store is the source of truth, Fabric shows it.
-    const objects = useEditorStore((s) => s.design[side]);
+    const activePart = useEditorStore((s) => s.activePart);
+    const objects = useEditorStore((s) => surfaceObjects(s.design, s.activePart, side));
     const selectedObjectIds = useEditorStore((s) => s.selectedObjectIds);
     const fabricObjects = useRef(new Map<string, BoundObject>());
     const latestObjects = useRef<CanvasObject[]>(objects);
     const latestSelection = useRef<string[]>(selectedObjectIds);
     const sideRef = useRef(side);
-    const shownSide = useRef<BoxSide>(side);
+    /** Which printed surface (part + side) the Fabric objects currently show. */
+    const shownSurface = useRef(`${activePart}:${side}`);
     const generation = useRef(0);
     const groupRef = useRef<() => void>(() => {});
     const ungroupRef = useRef<() => void>(() => {});
@@ -263,7 +265,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
                 return;
             }
             if (!ids.length) return;
-            const list = store.design[sideRef.current];
+            const list = surfaceObjects(store.design, store.activePart, sideRef.current);
             const unlockedIds = ids.filter((id) => !list.find((o) => o.id === id)?.locked);
             if (e.key.startsWith('Arrow')) {
                 // Nudge 1 mm, or 10 mm with Shift.
@@ -290,7 +292,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
                 return;
             }
             if (e.key === 'Delete' || e.key === 'Backspace') {
-                const unlocked = ids.filter((id) => !store.design[sideRef.current].find((o) => o.id === id)?.locked);
+                const unlocked = ids.filter((id) => !list.find((o) => o.id === id)?.locked);
                 if (unlocked.length) store.removeObjects(sideRef.current, unlocked);
                 e.preventDefault();
             } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
@@ -307,7 +309,8 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             if (!patches.length) return;
             useEditorStore.getState().updateObjects(sideRef.current, patches);
             // Fabric already shows these values; mark them as applied so the store sync leaves them alone.
-            const fresh = useEditorStore.getState().design[sideRef.current];
+            const st = useEditorStore.getState();
+            const fresh = surfaceObjects(st.design, st.activePart, sideRef.current);
             for (const o of objs) {
                 const obj = fresh.find((x) => x.id === o.objectId);
                 if (obj) o.propsKey = propsKey(obj);
@@ -434,16 +437,17 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const gen = ++generation.current;
+        generation.current += 1;
         const map = fabricObjects.current;
 
-        if (shownSide.current !== side) {
+        const surface = `${activePart}:${side}`;
+        if (shownSurface.current !== surface) {
             selecting.current = true;
             canvas.discardActiveObject();
             selecting.current = false;
             map.forEach((fo) => canvas.remove(fo));
             map.clear();
-            shownSide.current = side;
+            shownSurface.current = surface;
         }
 
         const wanted = new Map(objects.map((o) => [o.id, o]));
@@ -473,7 +477,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             pending.push(
                 createFabricObject(obj).then((created) => {
                     const latest = latestObjects.current.find((o) => o.id === obj.id);
-                    if (!created || !latest || shownSide.current !== side || map.has(obj.id)) return;
+                    if (!created || !latest || shownSurface.current !== surface || map.has(obj.id)) return;
                     applyToFabric(created, latest);
                     map.set(obj.id, created);
                     canvas.add(created);
@@ -489,10 +493,11 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
         finish();
         if (pending.length) {
             void Promise.all(pending).then(() => {
-                if (gen === generation.current || shownSide.current === side) finish();
+                // finish() is idempotent, so a slower pass may still restack after a newer one.
+                if (shownSurface.current === surface) finish();
             });
         }
-    }, [objects, side, restack, syncSelection]);
+    }, [objects, side, activePart, restack, syncSelection]);
 
     // Selection changed from outside the canvas (toolbar, sidebar, undo).
     useEffect(() => {

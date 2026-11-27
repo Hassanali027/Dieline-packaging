@@ -1,11 +1,14 @@
-import { buildFoldTree, foldedBounds, nodeQuaternion, styleOrientation, type FoldNode } from '@/lib/three/foldTree';
-import type { BoxStyle, DielineResult } from '@/types/design';
+import { buildFoldTree, nodeQuaternion, type FoldNode } from '@/lib/three/foldTree';
+import type { DielineResult } from '@/types/design';
 import { useEffect, useMemo } from 'react';
-import { ExtrudeGeometry, Shape, Vector2, Vector3, type BufferGeometry, type Texture } from 'three';
+import { ExtrudeGeometry, Shape, Vector2, type BufferGeometry, type Quaternion, type Texture } from 'three';
 
 type Props = {
     result: DielineResult;
-    style?: BoxStyle;
+    /** Where the assembly put this piece (see lib/three/assembly.ts). */
+    orientation: Quaternion;
+    position: [number, number, number];
+    /** 0 = flat, 1 = folded. */
     progress: number;
     thickness: number;
     outsideColor: string;
@@ -68,7 +71,7 @@ function usePanelGeometry(node: FoldNode, thickness: number, sheet: { width: num
     return geometry;
 }
 
-type NodeProps = Omit<Props, 'result' | 'style'> & { node: FoldNode; sheet: { width: number; height: number } };
+type NodeProps = Omit<Props, 'result' | 'orientation' | 'position'> & { node: FoldNode; sheet: { width: number; height: number } };
 
 function PanelNode({ node, sheet, ...props }: NodeProps) {
     const geometry = usePanelGeometry(node, props.thickness, sheet);
@@ -116,21 +119,13 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
     );
 }
 
-/** Folds the dieline panels around their hinges and stands the box on the ground, centred. */
-export default function FoldedBox({ result, style, ...props }: Props) {
+/** Folds one piece's panels around their hinges and puts it where the assembly says. */
+export default function FoldedBox({ result, orientation, position, ...props }: Props) {
     const roots = useMemo(() => buildFoldTree(result.panels), [result]);
-    const orientation = useMemo(() => styleOrientation(style), [style]);
     const sheet = result.overallSize;
 
-    // Centre on the fully folded box (not the current fold) so it does not drift while folding.
-    const offset = useMemo<[number, number, number]>(() => {
-        const box = foldedBounds(result.panels, 1, orientation);
-        const centre = box.getCenter(new Vector3());
-        return [-centre.x, -box.min.y + props.thickness, -centre.z];
-    }, [result, orientation, props.thickness]);
-
     return (
-        <group position={offset}>
+        <group position={position}>
             <group quaternion={orientation}>
                 {roots.map((root) => (
                     <PanelNode key={root.panel.id} node={root} sheet={sheet} {...props} />

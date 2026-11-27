@@ -59,7 +59,18 @@ export type DielineResult = {
     bleedPath: string;
     safePath: string;
     overallSize: { width: number; height: number };
+    /** Rigid boxes: the printed parts in this result (panels carry `part`), e.g. ['lid', 'base', 'liner']. */
     parts?: string[];
+    /** Rigid boxes: chipboard blanks to cut (mm), the cutting list for the factory. */
+    chipboard?: ChipboardPiece[];
+};
+
+export type ChipboardPiece = {
+    part: 'lid' | 'base' | 'drawer' | 'sleeve' | 'tray';
+    name: string;
+    width: number;
+    height: number;
+    quantity: number;
 };
 
 export type BoxSource =
@@ -78,7 +89,7 @@ export type CanvasObject = {
     effect?: 'none' | 'emboss' | 'deboss';
 };
 
-export type DesignPartKey = 'lid' | 'base' | 'drawer' | 'sleeve' | 'tray';
+export type DesignPartKey = 'lid' | 'base' | 'drawer' | 'sleeve' | 'tray' | 'liner';
 
 export type Design = {
     source: BoxSource;

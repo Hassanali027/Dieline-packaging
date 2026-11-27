@@ -6,22 +6,32 @@ import EditorSidebar from '@/components/editor/EditorSidebar';
 import RightPanel from '@/components/editor/RightPanel';
 import SaveControls, { clearDraft, DraftBanner, draftHasWork, readDraft, type Draft } from '@/components/editor/SaveControls';
 import SelectionToolbar from '@/components/editor/SelectionToolbar';
+import ShareDialog from '@/components/editor/ShareDialog';
 import type { ProductItem } from '@/components/editor/types';
 import { useDieline } from '@/hooks/use-dieline';
-import { useSheetTextures } from '@/hooks/use-sheet-textures';
+import { useSheetTextures, type SheetSurface } from '@/hooks/use-sheet-textures';
 import type { SavedDesign } from '@/lib/api';
+import { extractPart } from '@/lib/dieline';
+import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
+import type { Design, DesignPartKey, DielineResult } from '@/types/design';
 import { Head } from '@inertiajs/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+const PART_LABELS: Record<string, string> = { lid: 'Lid', base: 'Base', liner: 'Liner', drawer: 'Drawer', sleeve: 'Sleeve', tray: 'Tray' };
 
 interface EditorPageProps {
     products: ProductItem[];
     activeProduct: ProductItem | null;
     /** Set when the URL has ?design={id} and the visitor owns it (EditorController). */
     savedDesign: SavedDesign | null;
+    /** Set on /s/{token}: a shared design, opened read-only. */
+    sharedDesign: { token: string; data: Design; expires_at: string } | null;
 }
 
-export default function EditorPage({ products, activeProduct, savedDesign }: EditorPageProps) {
+export default function EditorPage({ products, activeProduct, savedDesign, sharedDesign }: EditorPageProps) {
+    // Shared links open read-only until the visitor chooses "Edit a copy".
+    const [readOnly, setReadOnly] = useState(!!sharedDesign);
     const setSource = useEditorStore((s) => s.setSource);
     const activeSide = useEditorStore((s) => s.activeSide);
     const material = useEditorStore((s) => s.design.material);
@@ -34,11 +44,43 @@ export default function EditorPage({ products, activeProduct, savedDesign }: Edi
     const { params, result, errors, supported } = useDieline();
     const controller = useRef<CanvasController>(null);
     const [zoom, setZoom] = useState(1);
-    const textures = useSheetTextures(result, outsideObjects, insideObjects, faceColors, material);
-    const sheet = result ? result.overallSize : null;
+    const activePart = useEditorStore((s) => s.activePart);
+    const setActivePart = useEditorStore((s) => s.setActivePart);
+    const designParts = useEditorStore((s) => s.design.parts);
+
+    // Rigid boxes: one dieline per part (lid / base / liner), each starting at (0, 0).
+    const parts = useMemo(() => (result?.parts ?? []) as DesignPartKey[], [result]);
+    const partResults = useMemo(() => {
+        const map: Partial<Record<DesignPartKey, DielineResult>> = {};
+        if (result) for (const p of parts) map[p] = extractPart(result, p);
+        return map;
+    }, [result, parts]);
+    const sheetResult = (activePart && partResults[activePart]) || result;
+
+    // Keep the part tab valid when the style changes (folding styles have no parts).
+    useEffect(() => {
+        if (!parts.length) {
+            if (activePart) setActivePart(null);
+        } else if (!activePart || !parts.includes(activePart)) {
+            setActivePart(parts[0]);
+        }
+    }, [parts, activePart, setActivePart]);
+
+    const surfaces = useMemo<SheetSurface[]>(() => {
+        if (!result) return [];
+        if (!parts.length) return [{ key: 'main', result, outside: outsideObjects, inside: insideObjects }];
+        return parts.map((p) => ({
+            key: p,
+            result: partResults[p]!,
+            outside: designParts?.[p]?.outside ?? [],
+            inside: designParts?.[p]?.inside ?? [],
+        }));
+    }, [result, parts, partResults, outsideObjects, insideObjects, designParts]);
+    const textures = useSheetTextures(surfaces, faceColors, material);
+    const sheet = sheetResult ? sheetResult.overallSize : null;
     // Read the local draft once, before the autosave can overwrite it.
     const [draftOffer, setDraftOffer] = useState<Draft | null>(() => {
-        if (savedDesign || typeof window === 'undefined') return null;
+        if (savedDesign || sharedDesign || typeof window === 'undefined') return null;
         const draft = readDraft();
         return draft && draftHasWork(draft) ? draft : null;
     });
@@ -55,11 +97,22 @@ export default function EditorPage({ products, activeProduct, savedDesign }: Edi
             useEditorStore.getState().loadDesign(savedDesign.data, { id: savedDesign.id, name: savedDesign.name, baseline: savedDesign.data });
             return;
         }
+        if (sharedDesign) {
+            useEditorStore.getState().loadDesign(sharedDesign.data, { id: null, name: 'Shared design', baseline: null });
+            return;
+        }
         if (activeProduct?.default_params) {
             setSource({ kind: 'parametric', params: activeProduct.default_params });
             useEditorStore.temporal.getState().clear();
         }
-    }, [activeProduct, savedDesign, setSource]);
+    }, [activeProduct, savedDesign, sharedDesign, setSource]);
+
+    /** Turns the shared view into the visitor's own unsaved copy (saving creates a new design). */
+    const editCopy = () => {
+        setReadOnly(false);
+        useEditorStore.getState().setDesignMeta({ id: null, name: 'Copy of shared design', baseline: null });
+        window.history.replaceState(window.history.state, '', `/editor/${activeProduct?.slug ?? ''}`);
+    };
 
     const restoreDraft = () => {
         if (!draftOffer) return;
@@ -98,19 +151,21 @@ export default function EditorPage({ products, activeProduct, savedDesign }: Edi
         <>
             <Head title={activeProduct ? `${activeProduct.name} — Dieline Editor` : 'Dieline Editor'} />
             <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-900">
-                <EditorSidebar
-                    panels={{
-                        box: <BoxSettings products={products} params={params} errors={errors} onPickProduct={pickProduct} />,
-                        uploads: <UploadsPanel sheet={sheet} />,
-                        elements: <ElementsPanel sheet={sheet} />,
-                        text: <TextPanel sheet={sheet} />,
-                    }}
-                />
+                <div className={cn('flex h-full', readOnly && 'pointer-events-none opacity-50')} aria-disabled={readOnly}>
+                    <EditorSidebar
+                        panels={{
+                            box: <BoxSettings products={products} params={params} errors={errors} onPickProduct={pickProduct} />,
+                            uploads: <UploadsPanel sheet={sheet} />,
+                            elements: <ElementsPanel sheet={sheet} />,
+                            text: <TextPanel sheet={sheet} />,
+                        }}
+                    />
+                </div>
 
                 <main className="relative flex min-w-0 flex-1 flex-col">
                     <div className="relative flex-1">
                         <DielineCanvas
-                            result={result}
+                            result={sheetResult}
                             side={activeSide}
                             material={material}
                             faceColors={faceColors}
@@ -119,29 +174,76 @@ export default function EditorPage({ products, activeProduct, savedDesign }: Edi
                             onZoomChange={setZoom}
                             controllerRef={controller}
                         />
-                        <div className="pointer-events-none absolute top-3 left-3 rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-600 capitalize shadow-xs">
-                            {activeSide} view
+                        {/* One top bar: view + part tabs on the left, saving on the right; wraps on narrow screens. */}
+                        <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex flex-wrap items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                                <span className="rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-600 capitalize shadow-xs">
+                                    {activeSide} view
+                                </span>
+                                {parts.length > 0 && (
+                                    <div
+                                        className="pointer-events-auto flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-xs"
+                                        role="tablist"
+                                        aria-label="Box part"
+                                    >
+                                        {parts.map((p) => (
+                                            <button
+                                                key={p}
+                                                type="button"
+                                                role="tab"
+                                                aria-selected={activePart === p}
+                                                onClick={() => setActivePart(p)}
+                                                className={cn(
+                                                    'rounded-md px-3 py-1 text-xs font-medium',
+                                                    activePart === p ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100',
+                                                )}
+                                            >
+                                                {PART_LABELS[p] ?? p}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="ml-auto flex flex-col items-end gap-2">
+                                {readOnly ? (
+                                    <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-900 shadow-xs">
+                                        Shared design · view only
+                                        <button
+                                            type="button"
+                                            onClick={editCopy}
+                                            className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
+                                        >
+                                            Edit a copy
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-start gap-2">
+                                        <ShareDialog />
+                                        <SaveControls defaultName={`${activeProduct?.name ?? 'Box'} design`} autosave={!draftOffer} />
+                                    </div>
+                                )}
+                                {draftOffer && <DraftBanner draft={draftOffer} onRestore={restoreDraft} onDiscard={discardDraft} />}
+                            </div>
                         </div>
-                        <div className="pointer-events-none absolute top-3 right-3 flex flex-col items-end gap-2">
-                            <SaveControls defaultName={`${activeProduct?.name ?? 'Box'} design`} autosave={!draftOffer} />
-                            {draftOffer && <DraftBanner draft={draftOffer} onRestore={restoreDraft} onDiscard={discardDraft} />}
-                        </div>
+                        {readOnly && <div className="absolute inset-0 z-10" aria-hidden onPointerDown={(e) => e.stopPropagation()} />}
                         {canvasNotice && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-100/80">
                                 <div className="rounded-xl border border-slate-200 bg-white px-6 py-5 text-center text-sm text-slate-600 shadow-sm">
                                     {canvasNotice}
-                                    <div className="mt-1 text-xs text-slate-400">Folding styles (Mailer, Tuck, Burger, Tray, Sleeve) work today.</div>
+                                    <div className="mt-1 text-xs text-slate-400">
+                                        Folding styles (Mailer, Tuck, Burger, Tray, Sleeve) and Rigid Lid & Base work today.
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </div>
                     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2">
-                        <SelectionToolbar controller={controller} />
+                        {!readOnly && <SelectionToolbar controller={controller} />}
                         <BottomToolbar controller={controller} zoom={zoom} />
                     </div>
                 </main>
 
-                <RightPanel result={result} params={params} textures={textures} />
+                <RightPanel result={result} sheetResult={sheetResult} params={params} textures={textures} />
             </div>
         </>
     );

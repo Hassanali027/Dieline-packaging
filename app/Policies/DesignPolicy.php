@@ -12,9 +12,15 @@ use App\Support\GuestKey;
  */
 class DesignPolicy
 {
+    /** Staff (is_admin) may open any design, e.g. from a quote in the admin panel. */
     public function view(?User $user, Design $design): bool
     {
-        return $this->owns($user, $design);
+        return (bool) $user?->is_admin || $this->owns($user, $design);
+    }
+
+    public function viewAny(?User $user): bool
+    {
+        return (bool) $user?->is_admin;
     }
 
     public function update(?User $user, Design $design): bool
@@ -24,7 +30,12 @@ class DesignPolicy
 
     public function delete(?User $user, Design $design): bool
     {
-        return $this->owns($user, $design);
+        return (bool) $user?->is_admin || $this->owns($user, $design);
+    }
+
+    public function deleteAny(?User $user): bool
+    {
+        return (bool) $user?->is_admin;
     }
 
     private function owns(?User $user, Design $design): bool

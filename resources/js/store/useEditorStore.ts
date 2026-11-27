@@ -1,4 +1,4 @@
-import type { BoxParams, BoxSource, CanvasObject, Design } from '@/types/design';
+import type { BoxParams, BoxSource, CanvasObject, Design, DesignPartKey } from '@/types/design';
 import { temporal } from 'zundo';
 import { create } from 'zustand';
 
@@ -25,6 +25,28 @@ export function cloneWithNewIds(obj: CanvasObject): CanvasObject {
     return { ...obj, id: newObjectId(), props: { ...obj.props, ...(children ? { children } : {}) } };
 }
 
+const NO_OBJECTS: CanvasObject[] = [];
+
+/**
+ * The objects of one printed surface. Folding boxes have one sheet (design.outside/inside);
+ * rigid boxes keep each part's objects in design.parts[part]. Returns a stable empty array
+ * so React selectors do not loop.
+ */
+export function surfaceObjects(design: Design, part: DesignPartKey | null, side: BoxSide): CanvasObject[] {
+    if (!part) return design[side];
+    return design.parts?.[part]?.[side] ?? NO_OBJECTS;
+}
+
+function objectsOf(state: Pick<EditorState, 'design' | 'activePart'>, side: BoxSide): CanvasObject[] {
+    return surfaceObjects(state.design, state.activePart, side);
+}
+
+function withObjects(design: Design, part: DesignPartKey | null, side: BoxSide, objects: CanvasObject[]): Design {
+    if (!part) return { ...design, [side]: objects };
+    const current = design.parts?.[part] ?? { outside: [], inside: [] };
+    return { ...design, parts: { ...design.parts, [part]: { ...current, [side]: objects } } };
+}
+
 /** In-memory clipboard for Ctrl+C / Ctrl+V (objects, not the system clipboard). */
 let clipboard: CanvasObject[] = [];
 let pasteCount = 0;
@@ -32,6 +54,8 @@ let pasteCount = 0;
 export interface EditorState {
     activeTab: EditorTab;
     activeSide: BoxSide;
+    /** Rigid boxes: the part being designed (lid / base / liner). null for folding boxes. */
+    activePart: DesignPartKey | null;
     foldProgress: number;
     xRay: boolean;
     cameraPreset: CameraPreset;
@@ -42,6 +66,7 @@ export interface EditorState {
     setDesignMeta: (meta: Partial<DesignMeta>) => void;
     setActiveTab: (tab: EditorTab) => void;
     setActiveSide: (side: BoxSide) => void;
+    setActivePart: (part: DesignPartKey | null) => void;
     setFoldProgress: (value: number) => void;
     toggleXRay: () => void;
     setCameraPreset: (preset: CameraPreset) => void;
@@ -54,6 +79,8 @@ export interface EditorState {
     setObjects: (side: BoxSide, objects: CanvasObject[]) => void;
     /** Adds an object on top and selects it. */
     addObject: (side: BoxSide, object: CanvasObject) => void;
+    /** Adds several objects on top (e.g. a font combination) and selects them all. */
+    addObjects: (side: BoxSide, objects: CanvasObject[]) => void;
     /** Applies several patches as one undo step (e.g. moving a multi-selection). */
     updateObjects: (side: BoxSide, patches: ObjectPatch[]) => void;
     removeObjects: (side: BoxSide, ids: string[]) => void;
@@ -105,6 +132,7 @@ export const useEditorStore = create<EditorState>()(
         (set, get) => ({
             activeTab: 'box',
             activeSide: 'outside',
+            activePart: null,
             foldProgress: 0.9,
             xRay: false,
             cameraPreset: 'front',
@@ -120,7 +148,8 @@ export const useEditorStore = create<EditorState>()(
                 material: 'white',
             },
             setActiveTab: (activeTab) => set({ activeTab }),
-            setActiveSide: (activeSide) => set({ activeSide }),
+            setActiveSide: (activeSide) => set({ activeSide, selectedObjectIds: [] }),
+            setActivePart: (activePart) => set({ activePart, selectedObjectIds: [] }),
             setFoldProgress: (foldProgress) => set({ foldProgress: Math.max(0, Math.min(1, foldProgress)) }),
             toggleXRay: () => set((state) => ({ xRay: !state.xRay })),
             setCameraPreset: (cameraPreset) => set({ cameraPreset }),
@@ -158,18 +187,23 @@ export const useEditorStore = create<EditorState>()(
                 })),
             setObjects: (side, objects) =>
                 set((state) => ({
-                    design: { ...state.design, [side]: objects },
+                    design: withObjects(state.design, state.activePart, side, objects),
                 })),
             addObject: (side, object) =>
                 set((state) => ({
-                    design: { ...state.design, [side]: [...state.design[side], { ...object, side }] },
+                    design: withObjects(state.design, state.activePart, side, [...objectsOf(state, side), { ...object, side }]),
                     selectedObjectIds: [object.id],
+                })),
+            addObjects: (side, objects) =>
+                set((state) => ({
+                    design: withObjects(state.design, state.activePart, side, [...objectsOf(state, side), ...objects.map((o) => ({ ...o, side }))]),
+                    selectedObjectIds: objects.map((o) => o.id),
                 })),
             updateObjects: (side, patches) =>
                 set((state) => {
                     const byId = new Map(patches.map((p) => [p.id, p]));
                     let changed = false;
-                    const next = state.design[side].map((o) => {
+                    const next = objectsOf(state, side).map((o) => {
                         const p = byId.get(o.id);
                         if (!p) return o;
                         changed = true;
@@ -179,16 +213,21 @@ export const useEditorStore = create<EditorState>()(
                             props: p.props ? { ...o.props, ...p.props } : o.props,
                         };
                     });
-                    return changed ? { design: { ...state.design, [side]: next } } : state;
+                    return changed ? { design: withObjects(state.design, state.activePart, side, next) } : state;
                 }),
             removeObjects: (side, ids) =>
                 set((state) => ({
-                    design: { ...state.design, [side]: state.design[side].filter((o) => !ids.includes(o.id)) },
+                    design: withObjects(
+                        state.design,
+                        state.activePart,
+                        side,
+                        objectsOf(state, side).filter((o) => !ids.includes(o.id)),
+                    ),
                     selectedObjectIds: state.selectedObjectIds.filter((id) => !ids.includes(id)),
                 })),
             duplicateObjects: (side, ids) =>
                 set((state) => {
-                    const copies = state.design[side]
+                    const copies = objectsOf(state, side)
                         .filter((o) => ids.includes(o.id))
                         .map(cloneWithNewIds)
                         .map((o) => ({
@@ -202,28 +241,28 @@ export const useEditorStore = create<EditorState>()(
                         }));
                     if (!copies.length) return state;
                     return {
-                        design: { ...state.design, [side]: [...state.design[side], ...copies] },
+                        design: withObjects(state.design, state.activePart, side, [...objectsOf(state, side), ...copies]),
                         selectedObjectIds: copies.map((c) => c.id),
                     };
                 }),
             moveObjects: (side, ids, move) =>
                 set((state) => ({
-                    design: { ...state.design, [side]: reorder(state.design[side], ids, move) },
+                    design: withObjects(state.design, state.activePart, side, reorder(objectsOf(state, side), ids, move)),
                 })),
             replaceObjects: (side, removeIds, insert) =>
                 set((state) => {
-                    const list = state.design[side];
+                    const list = objectsOf(state, side);
                     const top = list.reduce((max, o, i) => (removeIds.includes(o.id) ? i : max), -1);
                     const before = list.slice(0, top + 1).filter((o) => !removeIds.includes(o.id));
                     const after = list.slice(top + 1).filter((o) => !removeIds.includes(o.id));
                     const placed = insert.map((o) => ({ ...o, side }));
                     return {
-                        design: { ...state.design, [side]: [...before, ...placed, ...after] },
+                        design: withObjects(state.design, state.activePart, side, [...before, ...placed, ...after]),
                         selectedObjectIds: placed.map((o) => o.id),
                     };
                 }),
             copyObjects: (side, ids) => {
-                clipboard = get().design[side].filter((o) => ids.includes(o.id));
+                clipboard = objectsOf(get(), side).filter((o) => ids.includes(o.id));
                 pasteCount = 0;
             },
             pasteObjects: (side) =>
@@ -238,7 +277,7 @@ export const useEditorStore = create<EditorState>()(
                         props: { ...o.props, left: Number(o.props.left ?? 0) + offset, top: Number(o.props.top ?? 0) + offset },
                     }));
                     return {
-                        design: { ...state.design, [side]: [...state.design[side], ...copies] },
+                        design: withObjects(state.design, state.activePart, side, [...objectsOf(state, side), ...copies]),
                         selectedObjectIds: copies.map((c) => c.id),
                     };
                 }),

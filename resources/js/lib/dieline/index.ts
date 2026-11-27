@@ -1,11 +1,14 @@
 import type { BoxParams, BoxStyle, DielineResult } from '../../types/design';
 import { toMm } from './geometry';
+import { buildDielineResult } from './result';
 import { generateMailer } from './styles/mailer';
+import { generateRigidLidBase } from './styles/rigid';
 import { generateBurger, generateSleeve, generateTray } from './styles/trays';
 import { generateReverseTuck, generateStraightTuck } from './styles/tuck';
 
 export * from './geometry';
 export { BLEED_MM, buildDielineResult, SAFE_MM } from './result';
+export { rigidSizes, WRAP_MM, type RigidSizes } from './styles/rigid';
 
 type Generator = (params: BoxParams) => DielineResult;
 
@@ -17,6 +20,7 @@ const GENERATORS: Partial<Record<BoxStyle, Generator>> = {
     burger: generateBurger,
     tray: generateTray,
     sleeve: generateSleeve,
+    'rigid-lid-base': generateRigidLidBase,
 };
 
 export const SUPPORTED_STYLES = Object.keys(GENERATORS) as BoxStyle[];
@@ -64,6 +68,19 @@ export function validateParams(params: BoxParams): string[] {
             errors.push(`${label} must be between ${LIMITS.dimension.min} and ${LIMITS.dimension.max} mm.`);
         }
     }
+    if (params.construction === 'rigid' && params.rigid) {
+        const r = params.rigid;
+        const depth = toMm(params.depth, params.unit);
+        if (r.turnIn !== undefined && (toMm(r.turnIn, params.unit) < 5 || toMm(r.turnIn, params.unit) >= depth)) {
+            errors.push('Turn-in must be at least 5 mm and less than the depth.');
+        }
+        if (r.lidDepth !== undefined && toMm(r.lidDepth, params.unit) < 5) {
+            errors.push('Lid depth must be at least 5 mm.');
+        }
+        if (r.boardThickness !== undefined && (r.boardThickness <= 0 || toMm(r.boardThickness, params.unit) > 6)) {
+            errors.push('Chipboard must be thicker than 0 and at most 6 mm.');
+        }
+    }
     const t = toMm(params.thickness, params.unit);
     if (!Number.isFinite(t) || t < LIMITS.thickness.min || t > LIMITS.thickness.max) {
         errors.push(`Thickness must be between ${LIMITS.thickness.min} and ${LIMITS.thickness.max} mm.`);
@@ -88,4 +105,16 @@ export function generateDieline(params: BoxParams): DielineResult {
         throw new InvalidParamsError(errors);
     }
     return generator(params);
+}
+
+/**
+ * One part of a multi-part (rigid) result as its own dieline, starting at (0, 0).
+ * The editor shows one part per tab and the 3D view textures each part separately.
+ * Folding styles have no parts: the result is returned unchanged.
+ */
+export function extractPart(result: DielineResult, part: string | null): DielineResult {
+    if (!part || !result.parts?.length) return result;
+    const panels = result.panels.filter((p) => p.part === part);
+    if (!panels.length) return result;
+    return { ...buildDielineResult(panels), chipboard: result.chipboard?.filter((c) => c.part === part) };
 }

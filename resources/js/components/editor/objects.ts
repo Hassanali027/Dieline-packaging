@@ -1,6 +1,6 @@
 import { newObjectId, type BoxSide } from '@/store/useEditorStore';
 import type { CanvasObject } from '@/types/design';
-import { Ellipse, FabricImage, Line, Rect, Textbox, Triangle, util, type FabricObject } from 'fabric';
+import { Ellipse, FabricImage, Group, Line, Rect, Textbox, Triangle, util, type FabricObject } from 'fabric';
 
 /**
  * Bridge between the store's CanvasObject JSON (the source of truth: undo, save, 3D texture)
@@ -11,7 +11,7 @@ export type ShapeKind = 'rect' | 'rounded' | 'circle' | 'triangle' | 'line';
 export type TextPreset = 'heading' | 'subheading' | 'body';
 
 /** Fabric objects we created carry the store id. */
-export type BoundObject = FabricObject & { objectId?: string; propsKey?: string; shapeKind?: string };
+export type BoundObject = FabricObject & { objectId?: string; propsKey?: string; shapeKind?: string; childrenKey?: string };
 
 /** 1 pt = 0.3528 mm; the toolbar shows pt, the canvas works in mm. */
 export const MM_PER_PT = 25.4 / 72;
@@ -112,6 +112,15 @@ export async function createFabricObject(obj: CanvasObject): Promise<BoundObject
         } catch {
             return null;
         }
+    } else if (obj.type === 'group') {
+        // Children are stored relative to the group centre; Fabric fits the group around them
+        // (centre = 0, 0), then the group's own transform is applied.
+        const children = (await Promise.all(groupChildren(obj).map((c) => createFabricObject(c)))).filter((c): c is BoundObject => !!c);
+        if (!children.length) return null;
+        const group = new Group(children, { subTargetCheck: false, interactive: false });
+        group.set(commonOptions(obj));
+        group.setCoords();
+        fo = group;
     }
 
     if (!fo) return null;
@@ -119,7 +128,12 @@ export async function createFabricObject(obj: CanvasObject): Promise<BoundObject
     bound.objectId = obj.id;
     bound.propsKey = propsKey(obj);
     if (obj.type === 'shape') bound.shapeKind = str(p.shape, 'rect');
+    if (obj.type === 'group') bound.childrenKey = JSON.stringify(groupChildren(obj));
     return bound;
+}
+
+export function groupChildren(obj: CanvasObject): CanvasObject[] {
+    return Array.isArray(obj.props.children) ? (obj.props.children as CanvasObject[]) : [];
 }
 
 /** Cheap change detection between the store and what a Fabric object last showed. */
@@ -134,6 +148,7 @@ export function applyToFabric(fo: BoundObject, obj: CanvasObject): boolean {
     // An image with a new source, or a shape with a new kind, is simpler to rebuild.
     if (obj.type === 'image' && (fo as FabricImage).getSrc?.() && !(fo as FabricImage).getSrc().endsWith(str(obj.props.src, ''))) return false;
     if (obj.type === 'shape' && fo.shapeKind !== str(obj.props.shape, 'rect')) return false;
+    if (obj.type === 'group' && fo.childrenKey !== JSON.stringify(groupChildren(obj))) return false;
 
     fo.set(commonOptions(obj));
     if (obj.type === 'text') fo.set(textOptions(obj));
@@ -190,6 +205,7 @@ export function objectSize(obj: CanvasObject): { width: number; height: number }
 function baseSize(obj: CanvasObject): { width: number; height: number } {
     const p = obj.props;
     if (obj.type === 'image') return { width: num(p.naturalWidth, 100), height: num(p.naturalHeight, 100) };
+    if (obj.type === 'group') return { width: num(p.width, 40), height: num(p.height, 40) };
     if (obj.type === 'text') return { width: num(p.width, 80), height: num(p.height, num(p.fontSize, 4) * 1.2) };
     if (str(p.shape, '') === 'line') return { width: num(p.width, 40), height: num(p.strokeWidth, 1) };
     return { width: num(p.width, 40), height: num(p.height, 40) };
@@ -290,4 +306,66 @@ export function makeImage(asset: UploadedImage, natural: { width: number; height
             opacity: 1,
         },
     };
+}
+
+/* ------------------------------------------------------------------ */
+/* Group / ungroup                                                     */
+/* ------------------------------------------------------------------ */
+
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+
+function decomposeProps(matrix: number[]): Record<string, number> {
+    const d = util.qrDecompose(matrix as Parameters<typeof util.qrDecompose>[0]);
+    return {
+        left: r3(d.translateX),
+        top: r3(d.translateY),
+        angle: Math.round((((d.angle % 360) + 360) % 360) * 100) / 100,
+        scaleX: Math.round(d.scaleX * 1e5) / 1e5,
+        scaleY: Math.round(d.scaleY * 1e5) / 1e5,
+    };
+}
+
+/**
+ * Builds a group CanvasObject from Fabric objects that sit in one parent (a multi-selection).
+ * `frame` is that parent: its transform becomes the group's, members keep their offsets to it.
+ */
+export function buildGroup(frame: FabricObject, members: BoundObject[], source: CanvasObject[], side: BoxSide): CanvasObject | null {
+    const order = new Map(source.map((o, i) => [o.id, i]));
+    const children = members
+        .filter((m) => m.objectId && order.has(m.objectId))
+        .sort((a, b) => order.get(a.objectId!)! - order.get(b.objectId!)!)
+        .map((m) => {
+            const src = source[order.get(m.objectId!)!];
+            return { ...src, locked: false, props: { ...src.props, ...decomposeProps(m.calcOwnMatrix()) } };
+        });
+    if (children.length < 2) return null;
+    return {
+        id: newObjectId(),
+        type: 'group',
+        side,
+        props: { ...readTransform(frame), opacity: 1, width: r3(frame.width), height: r3(frame.height), children },
+    };
+}
+
+/** The group's children with absolute transforms (and the group's opacity folded in). */
+export function explodeGroup(group: Group, obj: CanvasObject): CanvasObject[] {
+    const fabricChildren = group.getObjects();
+    const groupOpacity = num(obj.props.opacity, 1);
+    return groupChildren(obj).map((child, i) => {
+        const fc = fabricChildren[i];
+        const transform = fc ? decomposeProps(fc.calcTransformMatrix()) : {};
+        return { ...child, props: { ...child.props, ...transform, opacity: r3(num(child.props.opacity, 1) * groupOpacity) } };
+    });
+}
+
+/** Print standard; below this an image is flagged in the toolbar (plan: "image DPI warning"). */
+export const MIN_PRINT_DPI = 300;
+
+/** Effective print resolution of an image at its current size on the sheet. */
+export function imageDpi(obj: CanvasObject): number | null {
+    if (obj.type !== 'image') return null;
+    const naturalWidth = num(obj.props.naturalWidth, 0);
+    const widthMm = objectSize(obj).width;
+    if (!naturalWidth || !widthMm) return null;
+    return Math.round(naturalWidth / (widthMm / 25.4));
 }

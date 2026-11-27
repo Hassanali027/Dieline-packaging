@@ -4,13 +4,17 @@ import { useEditorStore, type BoxSide } from '@/store/useEditorStore';
 import type { CanvasObject, DielineResult, Pt } from '@/types/design';
 import { ActiveSelection, Canvas, Group, Path, Point, Polygon, Textbox, type FabricObject, type TPointerEventInfo } from 'fabric';
 import { useCallback, useEffect, useImperativeHandle, useRef, type Ref } from 'react';
-import { applyToFabric, createFabricObject, propsKey, readText, readTransform, type BoundObject } from './objects';
+import { applyToFabric, buildGroup, createFabricObject, explodeGroup, propsKey, readText, readTransform, type BoundObject } from './objects';
 
 export type CanvasController = {
     zoomIn: () => void;
     zoomOut: () => void;
     fit: () => void;
     getZoom: () => number;
+    /** Groups the current multi-selection (Ctrl+G). */
+    group: () => void;
+    /** Splits the selected group back into its objects (Ctrl+Shift+G). */
+    ungroup: () => void;
 };
 
 type Props = {
@@ -68,6 +72,8 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
     const sideRef = useRef(side);
     const shownSide = useRef<BoxSide>(side);
     const generation = useRef(0);
+    const groupRef = useRef<() => void>(() => {});
+    const ungroupRef = useRef<() => void>(() => {});
     /** True while we change the Fabric selection ourselves, so its events are not echoed back. */
     const selecting = useRef(false);
     latestObjects.current = objects;
@@ -135,6 +141,38 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
         [emitZoom],
     );
 
+    const groupSelection = useCallback(() => {
+        const canvas = canvasRef.current;
+        const active = canvas?.getActiveObject();
+        if (!canvas || !(active instanceof ActiveSelection)) return;
+        const members = active.getObjects() as BoundObject[];
+        const side = sideRef.current;
+        const group = buildGroup(active, members, latestObjects.current, side);
+        if (!group) return;
+        selecting.current = true;
+        canvas.discardActiveObject();
+        selecting.current = false;
+        useEditorStore.getState().replaceObjects(side, members.map((m) => m.objectId!).filter(Boolean), [group]);
+    }, []);
+
+    const ungroupSelection = useCallback(() => {
+        const canvas = canvasRef.current;
+        const active = canvas?.getActiveObject();
+        if (!canvas || !(active instanceof Group) || active instanceof ActiveSelection) return;
+        const objectId = (active as Group & BoundObject).objectId;
+        const side = sideRef.current;
+        const obj = latestObjects.current.find((o) => o.id === objectId);
+        if (!obj || obj.type !== 'group') return;
+        const children = explodeGroup(active, obj);
+        selecting.current = true;
+        canvas.discardActiveObject();
+        selecting.current = false;
+        useEditorStore.getState().replaceObjects(side, [obj.id], children);
+    }, []);
+
+    groupRef.current = groupSelection;
+    ungroupRef.current = ungroupSelection;
+
     useImperativeHandle(
         controllerRef,
         () => ({
@@ -142,8 +180,10 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             zoomOut: () => zoomBy(1 / 1.2),
             fit,
             getZoom: () => canvasRef.current?.getZoom() ?? 1,
+            group: groupSelection,
+            ungroup: ungroupSelection,
         }),
-        [fit, zoomBy],
+        [fit, zoomBy, groupSelection, ungroupSelection],
     );
 
     // Create the Fabric canvas once, with zoom (wheel) and pan (Space/Alt + drag, or middle mouse).
@@ -215,7 +255,40 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             }
             const store = useEditorStore.getState();
             const ids = store.selectedObjectIds;
+            const mod = e.ctrlKey || e.metaKey;
+            const key = e.key.toLowerCase();
+            if (mod && key === 'v') {
+                store.pasteObjects(sideRef.current);
+                e.preventDefault();
+                return;
+            }
             if (!ids.length) return;
+            const list = store.design[sideRef.current];
+            const unlockedIds = ids.filter((id) => !list.find((o) => o.id === id)?.locked);
+            if (e.key.startsWith('Arrow')) {
+                // Nudge 1 mm, or 10 mm with Shift.
+                const step = e.shiftKey ? 10 : 1;
+                const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+                const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+                const patches = unlockedIds.map((id) => {
+                    const o = list.find((x) => x.id === id)!;
+                    return { id, props: { left: Number(o.props.left ?? 0) + dx, top: Number(o.props.top ?? 0) + dy } };
+                });
+                if (patches.length) store.updateObjects(sideRef.current, patches);
+                e.preventDefault();
+                return;
+            }
+            if (mod && key === 'c') {
+                store.copyObjects(sideRef.current, ids);
+                e.preventDefault();
+                return;
+            }
+            if (mod && key === 'g') {
+                if (e.shiftKey) ungroupRef.current();
+                else groupRef.current();
+                e.preventDefault();
+                return;
+            }
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 const unlocked = ids.filter((id) => !store.design[sideRef.current].find((o) => o.id === id)?.locked);
                 if (unlocked.length) store.removeObjects(sideRef.current, unlocked);

@@ -4,10 +4,12 @@ import BoxSettings from '@/components/editor/BoxSettings';
 import DielineCanvas, { type CanvasController } from '@/components/editor/DielineCanvas';
 import EditorSidebar from '@/components/editor/EditorSidebar';
 import RightPanel from '@/components/editor/RightPanel';
+import SaveControls, { clearDraft, DraftBanner, draftHasWork, readDraft, type Draft } from '@/components/editor/SaveControls';
 import SelectionToolbar from '@/components/editor/SelectionToolbar';
 import type { ProductItem } from '@/components/editor/types';
 import { useDieline } from '@/hooks/use-dieline';
 import { useSheetTextures } from '@/hooks/use-sheet-textures';
+import type { SavedDesign } from '@/lib/api';
 import { useEditorStore } from '@/store/useEditorStore';
 import { Head } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
@@ -15,9 +17,11 @@ import { useEffect, useRef, useState } from 'react';
 interface EditorPageProps {
     products: ProductItem[];
     activeProduct: ProductItem | null;
+    /** Set when the URL has ?design={id} and the visitor owns it (EditorController). */
+    savedDesign: SavedDesign | null;
 }
 
-export default function EditorPage({ products, activeProduct }: EditorPageProps) {
+export default function EditorPage({ products, activeProduct, savedDesign }: EditorPageProps) {
     const setSource = useEditorStore((s) => s.setSource);
     const activeSide = useEditorStore((s) => s.activeSide);
     const material = useEditorStore((s) => s.design.material);
@@ -32,19 +36,40 @@ export default function EditorPage({ products, activeProduct }: EditorPageProps)
     const [zoom, setZoom] = useState(1);
     const textures = useSheetTextures(result, outsideObjects, insideObjects, faceColors, material);
     const sheet = result ? result.overallSize : null;
+    // Read the local draft once, before the autosave can overwrite it.
+    const [draftOffer, setDraftOffer] = useState<Draft | null>(() => {
+        if (savedDesign || typeof window === 'undefined') return null;
+        const draft = readDraft();
+        return draft && draftHasWork(draft) ? draft : null;
+    });
 
     const pickProduct = (product: ProductItem) => {
         setSelectedPanelId(null);
         setSource({ kind: 'parametric', params: product.default_params });
     };
 
-    // Load the product from the URL (/editor/{slug}) and start a fresh history for it.
+    // Open the saved design from ?design=, otherwise the product from the URL (/editor/{slug}),
+    // with a fresh undo history either way.
     useEffect(() => {
+        if (savedDesign) {
+            useEditorStore.getState().loadDesign(savedDesign.data, { id: savedDesign.id, name: savedDesign.name, baseline: savedDesign.data });
+            return;
+        }
         if (activeProduct?.default_params) {
             setSource({ kind: 'parametric', params: activeProduct.default_params });
             useEditorStore.temporal.getState().clear();
         }
-    }, [activeProduct, setSource]);
+    }, [activeProduct, savedDesign, setSource]);
+
+    const restoreDraft = () => {
+        if (!draftOffer) return;
+        useEditorStore.getState().loadDesign(draftOffer.design, { id: draftOffer.designId, name: draftOffer.name, baseline: null });
+        setDraftOffer(null);
+    };
+    const discardDraft = () => {
+        clearDraft();
+        setDraftOffer(null);
+    };
 
     // Ctrl/Cmd + Z / Y (Shift+Z) for undo / redo, ignored while typing in a field.
     useEffect(() => {
@@ -97,6 +122,10 @@ export default function EditorPage({ products, activeProduct }: EditorPageProps)
                         <div className="pointer-events-none absolute top-3 left-3 rounded-md bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-600 capitalize shadow-xs">
                             {activeSide} view
                         </div>
+                        <div className="pointer-events-none absolute top-3 right-3 flex flex-col items-end gap-2">
+                            <SaveControls defaultName={`${activeProduct?.name ?? 'Box'} design`} autosave={!draftOffer} />
+                            {draftOffer && <DraftBanner draft={draftOffer} onRestore={restoreDraft} onDiscard={discardDraft} />}
+                        </div>
                         {canvasNotice && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-100/80">
                                 <div className="rounded-xl border border-slate-200 bg-white px-6 py-5 text-center text-sm text-slate-600 shadow-sm">
@@ -107,7 +136,7 @@ export default function EditorPage({ products, activeProduct }: EditorPageProps)
                         )}
                     </div>
                     <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2">
-                        <SelectionToolbar />
+                        <SelectionToolbar controller={controller} />
                         <BottomToolbar controller={controller} zoom={zoom} />
                     </div>
                 </main>

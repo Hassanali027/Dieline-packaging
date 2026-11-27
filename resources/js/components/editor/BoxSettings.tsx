@@ -153,6 +153,22 @@ export default function BoxSettings({ products, params, errors, onPickProduct }:
                             {m.label}
                         </button>
                     ))}
+                    {/* Any other value of `material` is a custom board colour (#rrggbb). */}
+                    <label
+                        className={cn(
+                            'flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium',
+                            material.startsWith('#') ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 hover:bg-slate-50',
+                        )}
+                    >
+                        <input
+                            type="color"
+                            aria-label="Custom board colour"
+                            value={material.startsWith('#') ? material : '#e5e7eb'}
+                            onChange={(e) => setMaterial(e.target.value)}
+                            className="h-5 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
+                        />
+                        Custom
+                    </label>
                 </div>
             </section>
         </div>

@@ -7,6 +7,9 @@ export type BoxSide = 'outside' | 'inside';
 export type CameraPreset = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 export type ZOrderMove = 'forward' | 'backward' | 'front' | 'back';
 
+/** Server copy of the design: its id, name and the design as last saved (to tell if there are unsaved changes). */
+export type DesignMeta = { id: number | null; name: string; baseline: Design | null };
+
 /** A partial update for one canvas object: props are merged, other fields replaced. */
 export type ObjectPatch = { id: string; props?: Record<string, unknown>; locked?: boolean };
 
@@ -15,6 +18,16 @@ export function newObjectId(): string {
     idCounter += 1;
     return `obj-${Date.now().toString(36)}-${idCounter.toString(36)}`;
 }
+
+/** Deep copy with fresh ids (group children too), so copies never share ids with originals. */
+export function cloneWithNewIds(obj: CanvasObject): CanvasObject {
+    const children = Array.isArray(obj.props.children) ? (obj.props.children as CanvasObject[]).map(cloneWithNewIds) : undefined;
+    return { ...obj, id: newObjectId(), props: { ...obj.props, ...(children ? { children } : {}) } };
+}
+
+/** In-memory clipboard for Ctrl+C / Ctrl+V (objects, not the system clipboard). */
+let clipboard: CanvasObject[] = [];
+let pasteCount = 0;
 
 export interface EditorState {
     activeTab: EditorTab;
@@ -25,6 +38,8 @@ export interface EditorState {
     selectedObjectIds: string[];
     selectedPanelId: string | null;
     design: Design;
+    designMeta: DesignMeta;
+    setDesignMeta: (meta: Partial<DesignMeta>) => void;
     setActiveTab: (tab: EditorTab) => void;
     setActiveSide: (side: BoxSide) => void;
     setFoldProgress: (value: number) => void;
@@ -45,6 +60,15 @@ export interface EditorState {
     /** Copies the objects slightly offset, puts them on top and selects the copies. */
     duplicateObjects: (side: BoxSide, ids: string[]) => void;
     moveObjects: (side: BoxSide, ids: string[], move: ZOrderMove) => void;
+    /**
+     * Removes `removeIds` and puts `insert` where the top-most removed object was, as one undo
+     * step, then selects the inserted objects. Used by group / ungroup.
+     */
+    replaceObjects: (side: BoxSide, removeIds: string[], insert: CanvasObject[]) => void;
+    copyObjects: (side: BoxSide, ids: string[]) => void;
+    pasteObjects: (side: BoxSide) => void;
+    /** Replaces the whole design (loading a saved design or a draft) and clears the history. */
+    loadDesign: (design: Design, meta?: Partial<DesignMeta>) => void;
 }
 
 /** Offset used for pasted / duplicated objects, in mm. */
@@ -78,7 +102,7 @@ const defaultParams: BoxParams = {
 
 export const useEditorStore = create<EditorState>()(
     temporal(
-        (set) => ({
+        (set, get) => ({
             activeTab: 'box',
             activeSide: 'outside',
             foldProgress: 0.9,
@@ -86,6 +110,8 @@ export const useEditorStore = create<EditorState>()(
             cameraPreset: 'front',
             selectedObjectIds: [],
             selectedPanelId: null,
+            designMeta: { id: null, name: '', baseline: null },
+            setDesignMeta: (meta) => set((state) => ({ designMeta: { ...state.designMeta, ...meta } })),
             design: {
                 source: { kind: 'parametric', params: defaultParams },
                 outside: [],
@@ -164,9 +190,9 @@ export const useEditorStore = create<EditorState>()(
                 set((state) => {
                     const copies = state.design[side]
                         .filter((o) => ids.includes(o.id))
+                        .map(cloneWithNewIds)
                         .map((o) => ({
                             ...o,
-                            id: newObjectId(),
                             locked: false,
                             props: {
                                 ...o.props,
@@ -184,6 +210,47 @@ export const useEditorStore = create<EditorState>()(
                 set((state) => ({
                     design: { ...state.design, [side]: reorder(state.design[side], ids, move) },
                 })),
+            replaceObjects: (side, removeIds, insert) =>
+                set((state) => {
+                    const list = state.design[side];
+                    const top = list.reduce((max, o, i) => (removeIds.includes(o.id) ? i : max), -1);
+                    const before = list.slice(0, top + 1).filter((o) => !removeIds.includes(o.id));
+                    const after = list.slice(top + 1).filter((o) => !removeIds.includes(o.id));
+                    const placed = insert.map((o) => ({ ...o, side }));
+                    return {
+                        design: { ...state.design, [side]: [...before, ...placed, ...after] },
+                        selectedObjectIds: placed.map((o) => o.id),
+                    };
+                }),
+            copyObjects: (side, ids) => {
+                clipboard = get().design[side].filter((o) => ids.includes(o.id));
+                pasteCount = 0;
+            },
+            pasteObjects: (side) =>
+                set((state) => {
+                    if (!clipboard.length) return state;
+                    pasteCount += 1;
+                    const offset = DUPLICATE_OFFSET * pasteCount;
+                    const copies = clipboard.map(cloneWithNewIds).map((o) => ({
+                        ...o,
+                        side,
+                        locked: false,
+                        props: { ...o.props, left: Number(o.props.left ?? 0) + offset, top: Number(o.props.top ?? 0) + offset },
+                    }));
+                    return {
+                        design: { ...state.design, [side]: [...state.design[side], ...copies] },
+                        selectedObjectIds: copies.map((c) => c.id),
+                    };
+                }),
+            loadDesign: (design, meta) => {
+                set((state) => ({
+                    design,
+                    selectedObjectIds: [],
+                    selectedPanelId: null,
+                    designMeta: { ...state.designMeta, ...meta },
+                }));
+                useEditorStore.temporal.getState().clear();
+            },
         }),
         {
             limit: 50,

@@ -1,9 +1,12 @@
 import type { SheetTextures } from '@/hooks/use-sheet-textures';
 import { toMm } from '@/lib/dieline';
+import { downloadText } from '@/lib/export/download';
+import { dielineFileName, dielineToSvg } from '@/lib/export/svg';
 import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { useEditorStore, type CameraPreset } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
+import { Download } from 'lucide-react';
 import { lazy, Suspense } from 'react';
 
 // Three.js is large; load the 3D view in its own chunk so the 2D editor paints first.
@@ -151,6 +154,17 @@ export default function RightPanel({ result, params, textures }: Props) {
                         <Legend color="#22c55e" label="Safe" dashed />
                     </dt>
                 </dl>
+            )}
+
+            {result && (
+                <button
+                    type="button"
+                    onClick={() => downloadText(dielineFileName(params), dielineToSvg(result, { params: params ?? undefined }))}
+                    className="flex items-center justify-center gap-2 rounded-md border border-slate-200 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                    <Download className="size-4" />
+                    Download dieline (SVG)
+                </button>
             )}
         </aside>
     );

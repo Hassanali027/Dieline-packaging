@@ -1,3 +1,5 @@
+import type { Design } from '@/types/design';
+
 /**
  * Small fetch wrapper for the editor's JSON endpoints (routes/web.php, prefix /api).
  * They use the web session, so requests send cookies and Laravel's XSRF token.
@@ -53,6 +55,16 @@ export const UPLOAD_ACCEPT = 'image/png,image/jpeg,image/svg+xml,.svg';
 
 export function listUploads(): Promise<{ data: UploadedAsset[] }> {
     return api('/api/uploads');
+}
+
+export type SavedDesign = { id: number; name: string; data: Design; updated_at: string };
+
+/** Creates the design the first time (no id), updates it afterwards. */
+export function saveDesign(id: number | null, name: string, data: Design): Promise<{ data: SavedDesign }> {
+    return api(id ? `/api/designs/${id}` : '/api/designs', {
+        method: id ? 'PUT' : 'POST',
+        body: JSON.stringify({ name, data }),
+    });
 }
 
 export function uploadImage(file: File): Promise<{ data: UploadedAsset }> {

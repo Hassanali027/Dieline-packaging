@@ -11,13 +11,17 @@ import {
     ArrowUpToLine,
     Bold,
     Copy,
+    Group as GroupIcon,
     Italic,
     Lock,
     LockOpen,
     Trash2,
+    TriangleAlert,
+    Ungroup,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { FONT_FAMILIES, MM_PER_PT, objectSize, scaleForSize } from './objects';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import type { CanvasController } from './DielineCanvas';
+import { FONT_FAMILIES, imageDpi, MIN_PRINT_DPI, MM_PER_PT, objectSize, scaleForSize } from './objects';
 
 const round = (v: number, p = 1) => Math.round(v * 10 ** p) / 10 ** p;
 
@@ -125,7 +129,7 @@ function ColorField({ label, value, onCommit }: { label: string; value: string; 
 
 const Divider = () => <div className="mx-1 h-6 w-px bg-slate-200" />;
 
-export default function SelectionToolbar() {
+export default function SelectionToolbar({ controller }: { controller: RefObject<CanvasController | null> }) {
     const side = useEditorStore((s) => s.activeSide);
     const selectedIds = useEditorStore((s) => s.selectedObjectIds);
     const objects = useEditorStore((s) => s.design[s.activeSide]);
@@ -154,6 +158,7 @@ export default function SelectionToolbar() {
     const isShape = single?.type === 'shape' && !isLine;
     const size = single ? objectSize(single) : null;
     const opacity = Number(selected[0].props.opacity ?? 1);
+    const dpi = single?.type === 'image' ? imageDpi(single) : null;
 
     return (
         <div className="pointer-events-auto flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur">
@@ -285,6 +290,22 @@ export default function SelectionToolbar() {
                     />
                 </>
             )}
+            {dpi !== null && (
+                <span
+                    title={
+                        dpi < MIN_PRINT_DPI
+                            ? 'Below 300 DPI this image may print blurry. Make it smaller or upload a larger file.'
+                            : 'Good print resolution'
+                    }
+                    className={cn(
+                        'flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium tabular-nums',
+                        dpi < MIN_PRINT_DPI ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700',
+                    )}
+                >
+                    {dpi < MIN_PRINT_DPI && <TriangleAlert className="size-3.5" />}
+                    {dpi} DPI
+                </span>
+            )}
             {single && (
                 <NumberField
                     label="Rotate"
@@ -325,6 +346,16 @@ export default function SelectionToolbar() {
                 <ArrowDownToLine className="size-4" />
             </IconButton>
             <Divider />
+            {selected.length > 1 && (
+                <IconButton label="Group (Ctrl+G)" onClick={() => controller.current?.group()}>
+                    <GroupIcon className="size-4" />
+                </IconButton>
+            )}
+            {single?.type === 'group' && (
+                <IconButton label="Ungroup (Ctrl+Shift+G)" onClick={() => controller.current?.ungroup()}>
+                    <Ungroup className="size-4" />
+                </IconButton>
+            )}
             <IconButton
                 label={allLocked ? 'Unlock' : 'Lock'}
                 active={allLocked}

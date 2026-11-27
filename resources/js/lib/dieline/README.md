@@ -20,6 +20,11 @@
 | `geometry.ts`      | points, polygons, union (clipper2-js), bleed grow / safe shrink, segment merge, SVG paths |
 | `result.ts`        | panels → `DielineResult` (cut / crease / bleed / safe / size)                             |
 | `styles/mailer.ts` | Mailer box (roll-end front tuck)                                                          |
+| `styles/tuck.ts`   | Reverse tuck and straight tuck cartons                                                    |
+| `styles/trays.ts`  | Tray, burger box (tray + lid with lips) and sleeve                                        |
+| `styles/parts.ts`  | Shared flap shapes (tapered flaps, chamfered tuck flaps) and mm conversion                |
+
+`styles.test.ts` checks every style: one root, no overlapping panels, no cut along a crease, and that it folds (via `lib/three/foldTree.ts`) into a box of the requested inside size.
 
 `clipper2-js` 1.2.x `InflatePaths` returns broken outlines, so offsets are done in `geometry.ts` and only `Clipper.Union` is used.
 

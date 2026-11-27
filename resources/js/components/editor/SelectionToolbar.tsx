@@ -1,0 +1,357 @@
+import { cn } from '@/lib/utils';
+import { useEditorStore, type ZOrderMove } from '@/store/useEditorStore';
+import type { CanvasObject } from '@/types/design';
+import {
+    AlignCenter,
+    AlignLeft,
+    AlignRight,
+    ArrowDown,
+    ArrowDownToLine,
+    ArrowUp,
+    ArrowUpToLine,
+    Bold,
+    Copy,
+    Italic,
+    Lock,
+    LockOpen,
+    Trash2,
+} from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { FONT_FAMILIES, MM_PER_PT, objectSize, scaleForSize } from './objects';
+
+const round = (v: number, p = 1) => Math.round(v * 10 ** p) / 10 ** p;
+
+function IconButton({
+    label,
+    active,
+    disabled,
+    onClick,
+    children,
+}: {
+    label: string;
+    active?: boolean;
+    disabled?: boolean;
+    onClick: () => void;
+    children: ReactNode;
+}) {
+    return (
+        <button
+            type="button"
+            title={label}
+            aria-label={label}
+            aria-pressed={active}
+            disabled={disabled}
+            onClick={onClick}
+            className={cn(
+                'flex size-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-30 disabled:hover:bg-transparent',
+                active && 'bg-slate-900 text-white hover:bg-slate-800 hover:text-white',
+            )}
+        >
+            {children}
+        </button>
+    );
+}
+
+/** Number box that commits on blur / Enter (one undo step instead of one per keystroke). */
+function NumberField({
+    label,
+    value,
+    suffix,
+    onCommit,
+    width = 'w-14',
+}: {
+    label: string;
+    value: number;
+    suffix?: string;
+    onCommit: (v: number) => void;
+    width?: string;
+}) {
+    const [text, setText] = useState(String(value));
+    useEffect(() => setText(String(value)), [value]);
+    const commit = () => {
+        const n = Number(text);
+        if (Number.isFinite(n) && n !== value) onCommit(n);
+        else setText(String(value));
+    };
+    return (
+        <label className="flex items-center gap-1 text-[11px] text-slate-500" title={label}>
+            {label}
+            <span className="flex items-center rounded border border-slate-200 bg-white focus-within:border-slate-400">
+                <input
+                    type="number"
+                    step="any"
+                    value={text}
+                    aria-label={label}
+                    onChange={(e) => setText(e.target.value)}
+                    onBlur={commit}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                    className={cn('bg-transparent px-1.5 py-1 text-xs text-slate-900 outline-none', width)}
+                />
+                {suffix && <span className="pr-1.5 text-[10px] text-slate-400">{suffix}</span>}
+            </span>
+        </label>
+    );
+}
+
+/** Colour swatch that commits when the picker closes, not on every drag of the hue slider. */
+function ColorField({ label, value, onCommit }: { label: string; value: string; onCommit: (v: string) => void }) {
+    const ref = useRef<HTMLInputElement>(null);
+    const [local, setLocal] = useState(value);
+    const commitRef = useRef(onCommit);
+    commitRef.current = onCommit;
+    useEffect(() => setLocal(value), [value]);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const onChange = () => commitRef.current(el.value);
+        el.addEventListener('change', onChange);
+        return () => el.removeEventListener('change', onChange);
+    }, []);
+    const hex = /^#[0-9a-f]{6}$/i.test(local) ? local : '#000000';
+    return (
+        <label className="flex items-center gap-1 text-[11px] text-slate-500" title={label}>
+            {label}
+            <input
+                ref={ref}
+                type="color"
+                aria-label={label}
+                value={hex}
+                onChange={(e) => setLocal(e.target.value)}
+                className="h-7 w-8 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+            />
+        </label>
+    );
+}
+
+const Divider = () => <div className="mx-1 h-6 w-px bg-slate-200" />;
+
+export default function SelectionToolbar() {
+    const side = useEditorStore((s) => s.activeSide);
+    const selectedIds = useEditorStore((s) => s.selectedObjectIds);
+    const objects = useEditorStore((s) => s.design[s.activeSide]);
+    const updateObjects = useEditorStore((s) => s.updateObjects);
+    const removeObjects = useEditorStore((s) => s.removeObjects);
+    const duplicateObjects = useEditorStore((s) => s.duplicateObjects);
+    const moveObjects = useEditorStore((s) => s.moveObjects);
+
+    const selected = objects.filter((o) => selectedIds.includes(o.id));
+    if (!selected.length) return null;
+
+    const single: CanvasObject | null = selected.length === 1 ? selected[0] : null;
+    const allLocked = selected.every((o) => o.locked);
+    const ids = selected.map((o) => o.id);
+    const set = (props: Record<string, unknown>) =>
+        updateObjects(
+            side,
+            ids.map((id) => ({ id, props })),
+        );
+    const setOne = (o: CanvasObject, props: Record<string, unknown>) => updateObjects(side, [{ id: o.id, props }]);
+    const move = (m: ZOrderMove) => moveObjects(side, ids, m);
+
+    const p = single?.props ?? {};
+    const isText = single?.type === 'text';
+    const isLine = single?.type === 'shape' && p.shape === 'line';
+    const isShape = single?.type === 'shape' && !isLine;
+    const size = single ? objectSize(single) : null;
+    const opacity = Number(selected[0].props.opacity ?? 1);
+
+    return (
+        <div className="pointer-events-auto flex max-w-[calc(100%-2rem)] flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur">
+            {isText && single && (
+                <>
+                    <select
+                        aria-label="Font"
+                        value={String(p.fontFamily ?? 'Arial')}
+                        onChange={(e) => setOne(single, { fontFamily: e.target.value })}
+                        className="h-7 rounded border border-slate-200 bg-white px-1 text-xs"
+                    >
+                        {FONT_FAMILIES.map((f) => (
+                            <option key={f} value={f} style={{ fontFamily: f }}>
+                                {f}
+                            </option>
+                        ))}
+                    </select>
+                    <NumberField
+                        label="Size"
+                        suffix="pt"
+                        value={round(Number(p.fontSize ?? 4) / MM_PER_PT)}
+                        onCommit={(v) => v > 0 && setOne(single, { fontSize: v * MM_PER_PT })}
+                        width="w-10"
+                    />
+                    <IconButton
+                        label="Bold"
+                        active={String(p.fontWeight) === 'bold'}
+                        onClick={() => setOne(single, { fontWeight: p.fontWeight === 'bold' ? 'normal' : 'bold' })}
+                    >
+                        <Bold className="size-4" />
+                    </IconButton>
+                    <IconButton
+                        label="Italic"
+                        active={p.fontStyle === 'italic'}
+                        onClick={() => setOne(single, { fontStyle: p.fontStyle === 'italic' ? 'normal' : 'italic' })}
+                    >
+                        <Italic className="size-4" />
+                    </IconButton>
+                    {(['left', 'center', 'right'] as const).map((a) => (
+                        <IconButton
+                            key={a}
+                            label={`Align ${a}`}
+                            active={(p.textAlign ?? 'center') === a}
+                            onClick={() => setOne(single, { textAlign: a })}
+                        >
+                            {a === 'left' ? (
+                                <AlignLeft className="size-4" />
+                            ) : a === 'center' ? (
+                                <AlignCenter className="size-4" />
+                            ) : (
+                                <AlignRight className="size-4" />
+                            )}
+                        </IconButton>
+                    ))}
+                    <ColorField label="Colour" value={String(p.fill ?? '#000000')} onCommit={(v) => setOne(single, { fill: v })} />
+                    <Divider />
+                </>
+            )}
+
+            {isShape && single && (
+                <>
+                    <ColorField label="Fill" value={String(p.fill ?? '#6366f1')} onCommit={(v) => setOne(single, { fill: v })} />
+                    <ColorField
+                        label="Stroke"
+                        value={String(p.stroke || '#000000')}
+                        onCommit={(v) => setOne(single, { stroke: v, strokeWidth: Number(p.strokeWidth) || 0.5 })}
+                    />
+                    <NumberField
+                        label="Width"
+                        suffix="mm"
+                        value={round(Number(p.strokeWidth ?? 0), 2)}
+                        onCommit={(v) => v >= 0 && setOne(single, { strokeWidth: v })}
+                        width="w-10"
+                    />
+                    <select
+                        aria-label="Stroke style"
+                        value={Array.isArray(p.strokeDashArray) ? ((p.strokeDashArray as number[])[0] > 1 ? 'dashed' : 'dotted') : 'solid'}
+                        onChange={(e) =>
+                            setOne(single, {
+                                strokeDashArray: e.target.value === 'dashed' ? [4, 2] : e.target.value === 'dotted' ? [0.6, 1.2] : null,
+                            })
+                        }
+                        className="h-7 rounded border border-slate-200 bg-white px-1 text-xs"
+                    >
+                        <option value="solid">Solid</option>
+                        <option value="dashed">Dashed</option>
+                        <option value="dotted">Dotted</option>
+                    </select>
+                    {p.shape === 'rect' && (
+                        <NumberField
+                            label="Radius"
+                            suffix="mm"
+                            value={round(Number(p.rx ?? 0))}
+                            onCommit={(v) => v >= 0 && setOne(single, { rx: v })}
+                            width="w-10"
+                        />
+                    )}
+                    <Divider />
+                </>
+            )}
+
+            {isLine && single && (
+                <>
+                    <ColorField label="Colour" value={String(p.stroke ?? '#000000')} onCommit={(v) => setOne(single, { stroke: v })} />
+                    <NumberField
+                        label="Thickness"
+                        suffix="mm"
+                        value={round(Number(p.strokeWidth ?? 1), 2)}
+                        onCommit={(v) => v > 0 && setOne(single, { strokeWidth: v })}
+                        width="w-10"
+                    />
+                    <Divider />
+                </>
+            )}
+
+            {single && size && !isLine && (
+                <>
+                    <NumberField
+                        label="W"
+                        suffix="mm"
+                        value={round(size.width)}
+                        onCommit={(v) => v > 0 && setOne(single, scaleForSize(single, { width: v }))}
+                    />
+                    <NumberField
+                        label="H"
+                        suffix="mm"
+                        value={round(size.height)}
+                        onCommit={(v) => v > 0 && setOne(single, scaleForSize(single, { height: v }))}
+                    />
+                </>
+            )}
+            {single && (
+                <NumberField
+                    label="Rotate"
+                    suffix="°"
+                    value={round(Number(p.angle ?? 0))}
+                    onCommit={(v) => setOne(single, { angle: ((v % 360) + 360) % 360 })}
+                    width="w-11"
+                />
+            )}
+
+            <label className="flex items-center gap-1 text-[11px] text-slate-500" title="Opacity">
+                Opacity
+                <input
+                    type="range"
+                    min={0.05}
+                    max={1}
+                    step={0.05}
+                    defaultValue={opacity}
+                    key={`${ids.join()}-${opacity}`}
+                    aria-label="Opacity"
+                    onPointerUp={(e) => set({ opacity: Number((e.target as HTMLInputElement).value) })}
+                    onKeyUp={(e) => set({ opacity: Number((e.target as HTMLInputElement).value) })}
+                    className="w-16 accent-slate-900"
+                />
+            </label>
+
+            <Divider />
+            <IconButton label="Bring forward" onClick={() => move('forward')}>
+                <ArrowUp className="size-4" />
+            </IconButton>
+            <IconButton label="Send backward" onClick={() => move('backward')}>
+                <ArrowDown className="size-4" />
+            </IconButton>
+            <IconButton label="Bring to front" onClick={() => move('front')}>
+                <ArrowUpToLine className="size-4" />
+            </IconButton>
+            <IconButton label="Send to back" onClick={() => move('back')}>
+                <ArrowDownToLine className="size-4" />
+            </IconButton>
+            <Divider />
+            <IconButton
+                label={allLocked ? 'Unlock' : 'Lock'}
+                active={allLocked}
+                onClick={() =>
+                    updateObjects(
+                        side,
+                        ids.map((id) => ({ id, locked: !allLocked })),
+                    )
+                }
+            >
+                {allLocked ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
+            </IconButton>
+            <IconButton label="Duplicate (Ctrl+D)" onClick={() => duplicateObjects(side, ids)}>
+                <Copy className="size-4" />
+            </IconButton>
+            <IconButton
+                label="Delete (Del)"
+                disabled={allLocked}
+                onClick={() =>
+                    removeObjects(
+                        side,
+                        selected.filter((o) => !o.locked).map((o) => o.id),
+                    )
+                }
+            >
+                <Trash2 className="size-4" />
+            </IconButton>
+        </div>
+    );
+}

@@ -1,3 +1,4 @@
+import type { SheetTextures } from '@/hooks/use-sheet-textures';
 import { toMm } from '@/lib/dieline';
 import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
@@ -13,9 +14,10 @@ const PRESETS: CameraPreset[] = ['front', 'back', 'left', 'right', 'top', 'botto
 type Props = {
     result: DielineResult | null;
     params: BoxParams | null;
+    textures?: SheetTextures | null;
 };
 
-export default function RightPanel({ result, params }: Props) {
+export default function RightPanel({ result, params, textures }: Props) {
     const activeSide = useEditorStore((s) => s.activeSide);
     const setActiveSide = useEditorStore((s) => s.setActiveSide);
     const foldProgress = useEditorStore((s) => s.foldProgress);
@@ -45,6 +47,8 @@ export default function RightPanel({ result, params }: Props) {
                 <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-slate-400">Loading 3D…</div>}>
                     <Preview3D
                         result={result}
+                        style={params?.style}
+                        textures={textures}
                         size={size}
                         progress={foldProgress}
                         material={material}

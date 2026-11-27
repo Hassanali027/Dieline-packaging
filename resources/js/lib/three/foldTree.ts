@@ -1,14 +1,16 @@
-import { Matrix4, Quaternion, Vector3 } from 'three';
-import type { Panel, Pt } from '../../types/design';
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
+import type { BoxStyle, Panel, Pt } from '../../types/design';
 import { centroid } from '../dieline/geometry';
 
 /**
  * Turns flat dieline panels into a hinge tree the 3D view can fold.
  *
  * Mapping from the dieline (mm, Y down) to the 3D world (mm, Y up):
- *   dieline (x, y)  →  world (x, 0, y)
- * The sheet lies on the XZ plane with its printed outside face pointing down (-Y),
- * so every fold lifts panels upwards (+Y) and the printed side ends up outside the box.
+ *   dieline (x, y)  →  world (-x, 0, y)
+ * The dieline is drawn as seen from the printed outside. In 3D the sheet lies on the XZ
+ * plane printed side down (-Y), like a real sheet folded on a table, so seen from below
+ * it must read the right way round: hence the mirrored X. Every fold lifts panels
+ * upwards (+Y) and the printed side ends up outside the box.
  */
 export type FoldNode = {
     panel: Panel;
@@ -24,7 +26,7 @@ export type FoldNode = {
 };
 
 export function toWorld(p: Pt): Vector3 {
-    return new Vector3(p.x, 0, p.y);
+    return new Vector3(-p.x, 0, p.y);
 }
 
 export function buildFoldTree(panels: Panel[]): FoldNode[] {
@@ -57,7 +59,7 @@ export function buildFoldTree(panels: Panel[]): FoldNode[] {
         return {
             panel,
             origin,
-            offset: [origin.x - parentOrigin.x, 0, origin.y - parentOrigin.y],
+            offset: [-(origin.x - parentOrigin.x), 0, origin.y - parentOrigin.y],
             axis,
             sign,
             children,
@@ -85,9 +87,36 @@ export function panelMatrices(roots: FoldNode[], progress: number): Map<string, 
         const local = new Matrix4().compose(new Vector3(...node.offset), nodeQuaternion(node, progress), new Vector3(1, 1, 1));
         const world = parent.clone().multiply(local);
         // Geometry is authored relative to the pivot, so shift by -origin before applying the node transform.
-        out.set(node.panel.id, world.clone().multiply(new Matrix4().makeTranslation(-node.origin.x, 0, -node.origin.y)));
+        const pivot = toWorld(node.origin);
+        out.set(node.panel.id, world.clone().multiply(new Matrix4().makeTranslation(-pivot.x, 0, -pivot.z)));
         node.children.forEach((child) => walk(child, world));
     };
     roots.forEach((root) => walk(root, new Matrix4()));
     return out;
+}
+
+/**
+ * Styles whose root panel is a wall rather than the base (tuck end cartons) are folded
+ * lying on their back; this turns them upright, top closure up and front panel facing +Z.
+ */
+const UPRIGHT_STYLES: BoxStyle[] = ['reverse-tuck', 'straight-tuck'];
+
+export function styleOrientation(style: BoxStyle | undefined): Quaternion {
+    const q = new Quaternion();
+    if (style && UPRIGHT_STYLES.includes(style)) {
+        q.setFromAxisAngle(new Vector3(1, 0, 0), Math.PI / 2);
+    }
+    return q;
+}
+
+/** Bounding box of every panel at the given fold progress, after an optional orientation. */
+export function foldedBounds(panels: Panel[], progress: number, orientation = new Quaternion()): Box3 {
+    const matrices = panelMatrices(buildFoldTree(panels), progress);
+    const rotate = new Matrix4().makeRotationFromQuaternion(orientation);
+    const box = new Box3();
+    for (const panel of panels) {
+        const m = rotate.clone().multiply(matrices.get(panel.id)!);
+        for (const p of panel.polygon) box.expandByPoint(toWorld(p).applyMatrix4(m));
+    }
+    return box;
 }

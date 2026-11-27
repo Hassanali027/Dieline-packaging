@@ -40,15 +40,16 @@ describe('fold tree', () => {
             expect(p.y).toBeLessThanOrEqual(D + 1e-6);
         }
         for (const p of foldedPoints('front', 1)) expect(p.z).toBeCloseTo(base.maxY, 3);
-        for (const p of foldedPoints('side-left', 1)) expect(p.x).toBeCloseTo(base.minX, 3);
-        for (const p of foldedPoints('side-right', 1)) expect(p.x).toBeCloseTo(base.maxX, 3);
+        for (const p of foldedPoints('side-left', 1)) expect(p.x).toBeCloseTo(-base.minX, 3);
+        for (const p of foldedPoints('side-right', 1)) expect(p.x).toBeCloseTo(-base.maxX, 3);
     });
 
     it('closes the lid over the base', () => {
         for (const p of foldedPoints('lid', 1)) {
             expect(p.y).toBeCloseTo(D, 3);
-            expect(p.x).toBeGreaterThanOrEqual(base.minX - 1e-6);
-            expect(p.x).toBeLessThanOrEqual(base.minX + L + 1e-6);
+            // world X is the mirrored dieline X
+            expect(-p.x).toBeGreaterThanOrEqual(base.minX - 1e-6);
+            expect(-p.x).toBeLessThanOrEqual(base.minX + L + 1e-6);
             expect(p.z).toBeGreaterThanOrEqual(base.minY - 1e-6);
             expect(p.z).toBeLessThanOrEqual(base.minY + W + 1e-6);
         }
@@ -56,7 +57,7 @@ describe('fold tree', () => {
 
     it('rolls the double walls inside the box', () => {
         for (const p of foldedPoints('side-left-inner', 1)) {
-            expect(p.x).toBeCloseTo(base.minX, 3);
+            expect(p.x).toBeCloseTo(-base.minX, 3);
             expect(p.y).toBeGreaterThan(-1e-6);
         }
     });

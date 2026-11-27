@@ -1,14 +1,17 @@
+import type { SheetTextures } from '@/hooks/use-sheet-textures';
 import { materialColor } from '@/lib/three/materials';
 import type { CameraPreset } from '@/store/useEditorStore';
-import type { DielineResult } from '@/types/design';
+import type { BoxStyle, DielineResult } from '@/types/design';
 import { ContactShadows, OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
-import { useEffect, useRef } from 'react';
-import type { Vector3 } from 'three';
+import { useEffect, useMemo, useRef } from 'react';
+import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Vector3 } from 'three';
 import FoldedBox from './FoldedBox';
 
 type Props = {
     result: DielineResult | null;
+    style?: BoxStyle;
+    textures?: SheetTextures | null;
     size: { length: number; width: number; depth: number; thickness: number } | null;
     progress: number;
     material: string;
@@ -49,8 +52,46 @@ function CameraRig({ preset, size }: { preset: CameraPreset; size: NonNullable<P
     return null;
 }
 
-export default function Preview3D({ result, size, progress, material, faceColors, cameraPreset, selectedPanelId, onSelectPanel }: Props) {
+/**
+ * Wraps a texture canvas for three.js and re-uploads it when the editor redraws it.
+ * The inside sheet is drawn mirrored (as the editor shows it), so it is flipped back here.
+ */
+function useSheetTexture(canvas: HTMLCanvasElement | null | undefined, version: number, mirrored: boolean) {
+    const texture = useMemo(() => {
+        if (!canvas) return null;
+        const t = new CanvasTexture(canvas);
+        t.colorSpace = SRGBColorSpace;
+        t.anisotropy = 8;
+        if (mirrored) {
+            t.wrapS = RepeatWrapping;
+            t.repeat.x = -1;
+            t.offset.x = 1;
+        }
+        return t;
+    }, [canvas, mirrored]);
+
+    useEffect(() => {
+        if (texture) texture.needsUpdate = true;
+    }, [texture, version]);
+    useEffect(() => () => texture?.dispose(), [texture]);
+    return texture;
+}
+
+export default function Preview3D({
+    result,
+    style,
+    textures,
+    size,
+    progress,
+    material,
+    faceColors,
+    cameraPreset,
+    selectedPanelId,
+    onSelectPanel,
+}: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const outsideTexture = useSheetTexture(textures?.outside, textures?.version ?? 0, false);
+    const insideTexture = useSheetTexture(textures?.inside, textures?.version ?? 0, true);
     const extent = size ? Math.max(size.length, size.width, size.depth) : 200;
 
     return (
@@ -83,6 +124,10 @@ export default function Preview3D({ result, size, progress, material, faceColors
                 {result && size && (
                     <FoldedBox
                         result={result}
+                        style={style}
+                        outsideTexture={outsideTexture}
+                        insideTexture={insideTexture}
+                        transparent={material === 'transparent'}
                         progress={progress}
                         thickness={size.thickness}
                         outsideColor={materialColor(material, 'outside')}

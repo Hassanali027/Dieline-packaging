@@ -1,9 +1,10 @@
 import { BLEED_MM, mirrorPathX, mirrorPolygonX } from '@/lib/dieline';
 import { materialColor } from '@/lib/three/materials';
-import type { BoxSide } from '@/store/useEditorStore';
-import type { DielineResult, Pt } from '@/types/design';
-import { Canvas, Group, Path, Point, Polygon, type FabricObject, type TPointerEventInfo } from 'fabric';
+import { useEditorStore, type BoxSide } from '@/store/useEditorStore';
+import type { CanvasObject, DielineResult, Pt } from '@/types/design';
+import { ActiveSelection, Canvas, Group, Path, Point, Polygon, Textbox, type FabricObject, type TPointerEventInfo } from 'fabric';
 import { useCallback, useEffect, useImperativeHandle, useRef, type Ref } from 'react';
+import { applyToFabric, createFabricObject, propsKey, readText, readTransform, type BoundObject } from './objects';
 
 export type CanvasController = {
     zoomIn: () => void;
@@ -39,6 +40,14 @@ const COLORS = {
 /** Marks objects that belong to the locked dieline layer (not user content, not exported as design). */
 const DIELINE_LAYER = 'dieline-layer';
 
+type LayerObject = FabricObject & { layer?: string; panelId?: string };
+
+const isTyping = () => {
+    const el = document.activeElement as HTMLElement | null;
+    const tag = (el?.tagName ?? '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || !!el?.isContentEditable;
+};
+
 export default function DielineCanvas({ result, side, material, faceColors, selectedPanelId, onSelectPanel, onZoomChange, controllerRef }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasElRef = useRef<HTMLCanvasElement>(null);
@@ -49,6 +58,50 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
     const onZoomChangeRef = useRef(onZoomChange);
     onSelectPanelRef.current = onSelectPanel;
     onZoomChangeRef.current = onZoomChange;
+
+    // User objects: the store is the source of truth, Fabric shows it.
+    const objects = useEditorStore((s) => s.design[side]);
+    const selectedObjectIds = useEditorStore((s) => s.selectedObjectIds);
+    const fabricObjects = useRef(new Map<string, BoundObject>());
+    const latestObjects = useRef<CanvasObject[]>(objects);
+    const latestSelection = useRef<string[]>(selectedObjectIds);
+    const sideRef = useRef(side);
+    const shownSide = useRef<BoxSide>(side);
+    const generation = useRef(0);
+    /** True while we change the Fabric selection ourselves, so its events are not echoed back. */
+    const selecting = useRef(false);
+    latestObjects.current = objects;
+    latestSelection.current = selectedObjectIds;
+    sideRef.current = side;
+
+    /** Panels at the bottom, user objects in store order, dieline lines on top as an overlay. */
+    const restack = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const all = canvas.getObjects() as LayerObject[];
+        const panels = all.filter((o) => o.layer === DIELINE_LAYER && o.panelId);
+        const lines = all.filter((o) => o.layer === DIELINE_LAYER && !o.panelId);
+        const users = latestObjects.current.map((o) => fabricObjects.current.get(o.id)).filter((o): o is BoundObject => !!o);
+        [...panels, ...users, ...lines].forEach((o, i) => {
+            if (canvas.getObjects().indexOf(o) !== i) canvas.moveObjectTo(o, i);
+        });
+    }, []);
+
+    /** Makes the Fabric selection match the store's selectedObjectIds. */
+    const syncSelection = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const wanted = latestSelection.current;
+        const current = canvas.getActiveObjects().map((o) => (o as BoundObject).objectId);
+        if (wanted.length === current.length && wanted.every((id) => current.includes(id))) return;
+        selecting.current = true;
+        canvas.discardActiveObject();
+        const objs = wanted.map((id) => fabricObjects.current.get(id)).filter((o): o is BoundObject => !!o);
+        if (objs.length === 1) canvas.setActiveObject(objs[0]);
+        else if (objs.length > 1) canvas.setActiveObject(new ActiveSelection(objs, { canvas }));
+        selecting.current = false;
+        canvas.requestRenderAll();
+    }, []);
 
     const emitZoom = useCallback(() => {
         const canvas = canvasRef.current;
@@ -107,6 +160,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             stopContextMenu: true,
         });
         canvasRef.current = canvas;
+        const boundObjects = fabricObjects.current;
 
         let spaceDown = false;
         let panning = false;
@@ -149,18 +203,56 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             canvas.setCursor(spaceDown ? 'grab' : 'default');
         };
 
-        const isTyping = () => {
-            const tag = (document.activeElement?.tagName ?? '').toLowerCase();
-            return tag === 'input' || tag === 'textarea' || tag === 'select';
-        };
+        const editingText = () => canvas.getActiveObjects().some((o) => o instanceof Textbox && o.isEditing);
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.code === 'Space' && !isTyping()) {
+            if (isTyping() || editingText()) return;
+            if (e.code === 'Space') {
                 spaceDown = true;
                 canvas.defaultCursor = 'grab';
                 canvas.setCursor('grab');
                 e.preventDefault();
+                return;
+            }
+            const store = useEditorStore.getState();
+            const ids = store.selectedObjectIds;
+            if (!ids.length) return;
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                const unlocked = ids.filter((id) => !store.design[sideRef.current].find((o) => o.id === id)?.locked);
+                if (unlocked.length) store.removeObjects(sideRef.current, unlocked);
+                e.preventDefault();
+            } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+                store.duplicateObjects(sideRef.current, ids);
+                e.preventDefault();
             }
         };
+
+        // Fabric -> store: one undo step per finished drag / scale / rotate / text edit.
+        const commit = (target: FabricObject | undefined) => {
+            if (!target) return;
+            const objs = (target instanceof ActiveSelection ? target.getObjects() : [target]) as BoundObject[];
+            const patches = objs.filter((o) => o.objectId).map((o) => ({ id: o.objectId!, props: { ...readTransform(o), ...readText(o) } }));
+            if (!patches.length) return;
+            useEditorStore.getState().updateObjects(sideRef.current, patches);
+            // Fabric already shows these values; mark them as applied so the store sync leaves them alone.
+            const fresh = useEditorStore.getState().design[sideRef.current];
+            for (const o of objs) {
+                const obj = fresh.find((x) => x.id === o.objectId);
+                if (obj) o.propsKey = propsKey(obj);
+            }
+        };
+        const onSelection = () => {
+            if (selecting.current) return;
+            const ids = canvas
+                .getActiveObjects()
+                .map((o) => (o as BoundObject).objectId)
+                .filter((id): id is string => !!id);
+            useEditorStore.getState().setSelectedObjectIds(ids);
+        };
+        canvas.on('object:modified', (e) => commit(e.target));
+        canvas.on('text:editing:exited', (e) => commit(e.target));
+        canvas.on('selection:created', onSelection);
+        canvas.on('selection:updated', onSelection);
+        canvas.on('selection:cleared', onSelection);
         const onKeyUp = (e: KeyboardEvent) => {
             if (e.code === 'Space') {
                 spaceDown = false;
@@ -192,6 +284,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             window.removeEventListener('keydown', onKeyDown);
             window.removeEventListener('keyup', onKeyUp);
             canvasRef.current = null;
+            boundObjects.clear();
             void canvas.dispose();
         };
     }, [emitZoom, fit]);
@@ -204,7 +297,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
 
         canvas
             .getObjects()
-            .filter((o) => (o as FabricObject & { layer?: string }).layer === DIELINE_LAYER)
+            .filter((o) => (o as LayerObject).layer === DIELINE_LAYER)
             .forEach((o) => canvas.remove(o));
 
         const locked = {
@@ -253,8 +346,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
         const layer = [...panelObjects, linesGroup];
         layer.forEach((obj) => Object.assign(obj, { layer: DIELINE_LAYER }));
         canvas.add(...layer);
-        // Keep the dieline under any user objects, in the same order (panels, then lines).
-        [...layer].reverse().forEach((obj) => canvas.sendObjectToBack(obj));
+        restack();
         canvas.requestRenderAll();
 
         // Fit on first draw and whenever the overall size changes (new style / size).
@@ -263,7 +355,76 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             fittedFor.current = key;
             fit();
         }
-    }, [result, side, material, faceColors, selectedPanelId, fit]);
+    }, [result, side, material, faceColors, selectedPanelId, fit, restack]);
+
+    // Store -> Fabric: add, update, remove and reorder user objects for the visible side.
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const gen = ++generation.current;
+        const map = fabricObjects.current;
+
+        if (shownSide.current !== side) {
+            selecting.current = true;
+            canvas.discardActiveObject();
+            selecting.current = false;
+            map.forEach((fo) => canvas.remove(fo));
+            map.clear();
+            shownSide.current = side;
+        }
+
+        const wanted = new Map(objects.map((o) => [o.id, o]));
+        const stale = objects.filter((o) => map.has(o.id) && map.get(o.id)!.propsKey !== propsKey(o));
+        // Objects inside a multi-selection use selection-relative coordinates: drop it before updating them.
+        if (stale.length && canvas.getActiveObject() instanceof ActiveSelection) {
+            selecting.current = true;
+            canvas.discardActiveObject();
+            selecting.current = false;
+        }
+
+        for (const [id, fo] of map) {
+            if (!wanted.has(id)) {
+                canvas.remove(fo);
+                map.delete(id);
+            }
+        }
+
+        const pending: Promise<void>[] = [];
+        for (const obj of objects) {
+            const fo = map.get(obj.id);
+            if (fo && applyToFabric(fo, obj)) continue;
+            if (fo) {
+                canvas.remove(fo);
+                map.delete(obj.id);
+            }
+            pending.push(
+                createFabricObject(obj).then((created) => {
+                    const latest = latestObjects.current.find((o) => o.id === obj.id);
+                    if (!created || !latest || shownSide.current !== side || map.has(obj.id)) return;
+                    applyToFabric(created, latest);
+                    map.set(obj.id, created);
+                    canvas.add(created);
+                }),
+            );
+        }
+
+        const finish = () => {
+            restack();
+            syncSelection();
+            canvas.requestRenderAll();
+        };
+        finish();
+        if (pending.length) {
+            void Promise.all(pending).then(() => {
+                if (gen === generation.current || shownSide.current === side) finish();
+            });
+        }
+    }, [objects, side, restack, syncSelection]);
+
+    // Selection changed from outside the canvas (toolbar, sidebar, undo).
+    useEffect(() => {
+        syncSelection();
+    }, [selectedObjectIds, syncSelection]);
 
     return (
         <div ref={containerRef} className="absolute inset-0 overflow-hidden">

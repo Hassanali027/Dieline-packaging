@@ -1,43 +1,82 @@
-import { buildFoldTree, nodeQuaternion, type FoldNode } from '@/lib/three/foldTree';
-import type { DielineResult } from '@/types/design';
+import { buildFoldTree, foldedBounds, nodeQuaternion, styleOrientation, type FoldNode } from '@/lib/three/foldTree';
+import type { BoxStyle, DielineResult } from '@/types/design';
 import { useEffect, useMemo } from 'react';
-import { DoubleSide, ExtrudeGeometry, Shape } from 'three';
+import { ExtrudeGeometry, Shape, Vector2, Vector3, type BufferGeometry, type Texture } from 'three';
 
 type Props = {
     result: DielineResult;
+    style?: BoxStyle;
     progress: number;
     thickness: number;
     outsideColor: string;
     insideColor: string;
     faceColors: Record<string, string>;
+    /** Printed sheet textures in dieline space (Dev 2's texture canvases). */
+    outsideTexture?: Texture | null;
+    insideTexture?: Texture | null;
+    transparent?: boolean;
     selectedPanelId: string | null;
     onSelectPanel?: (id: string) => void;
 };
 
-/** Extruded board for one panel, authored relative to the panel's pivot (hinge start). */
-function usePanelGeometry(node: FoldNode, thickness: number) {
+const EDGE_COLOR = '#d6cfc4';
+
+/**
+ * Extruded board for one panel, authored relative to the panel's pivot (hinge start).
+ * Shape space is world X/Z before the mesh rotation, so dieline X is mirrored (see foldTree).
+ * Caps get UVs in sheet space (u = x / sheet width, v = 1 - y / sheet height) so one texture
+ * of the whole printed sheet lands on every panel in the right place.
+ */
+function usePanelGeometry(node: FoldNode, thickness: number, sheet: { width: number; height: number }) {
     const geometry = useMemo(() => {
+        const { x: ox, y: oy } = node.origin;
         const shape = new Shape();
         node.panel.polygon.forEach((p, i) => {
-            const x = p.x - node.origin.x;
-            const y = p.y - node.origin.y;
+            const x = -(p.x - ox);
+            const y = p.y - oy;
             if (i === 0) shape.moveTo(x, y);
             else shape.lineTo(x, y);
         });
         shape.closePath();
-        // Extrude along +Z; the mesh is rotated so +Z becomes -Y (board thickness below the sheet).
-        return new ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false, curveSegments: 1 });
-    }, [node, thickness]);
+
+        const uv = (vertices: ArrayLike<number>, i: number) =>
+            new Vector2((ox - vertices[i * 3]) / sheet.width, 1 - (vertices[i * 3 + 1] + oy) / sheet.height);
+
+        const g: BufferGeometry = new ExtrudeGeometry(shape, {
+            depth: thickness,
+            bevelEnabled: false,
+            curveSegments: 1,
+            UVGenerator: {
+                generateTopUV: (_g, vertices, a, b, c) => [uv(vertices, a), uv(vertices, b), uv(vertices, c)],
+                generateSideWallUV: () => [new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1)],
+            },
+        });
+
+        // ExtrudeGeometry puts both caps in group 0 (first half z = 0, second half z = depth).
+        // After the mesh rotation z = 0 is the inside face and z = depth the printed outside.
+        const caps = g.groups.find((gr) => gr.materialIndex === 0);
+        if (caps) {
+            const half = caps.count / 2;
+            g.groups = g.groups.filter((gr) => gr !== caps);
+            g.addGroup(caps.start, half, 0); // inside
+            g.addGroup(caps.start + half, half, 2); // outside
+        }
+        return g;
+    }, [node, thickness, sheet.width, sheet.height]);
 
     useEffect(() => () => geometry.dispose(), [geometry]);
     return geometry;
 }
 
-function PanelNode({ node, ...props }: Props & { node: FoldNode }) {
-    const geometry = usePanelGeometry(node, props.thickness);
+type NodeProps = Omit<Props, 'result' | 'style'> & { node: FoldNode; sheet: { width: number; height: number } };
+
+function PanelNode({ node, sheet, ...props }: NodeProps) {
+    const geometry = usePanelGeometry(node, props.thickness, sheet);
     const quaternion = useMemo(() => nodeQuaternion(node, props.progress), [node, props.progress]);
     const selected = props.selectedPanelId === node.panel.id;
-    const outside = props.faceColors[node.panel.id] ?? props.outsideColor;
+    const faceColor = props.faceColors[node.panel.id];
+    const transparency = props.transparent ? { transparent: true, opacity: 0.45, depthWrite: false } : {};
+    const highlight = { emissive: selected ? '#4f46e5' : '#000000', emissiveIntensity: selected ? 0.25 : 0 };
 
     return (
         <group position={node.offset} quaternion={quaternion}>
@@ -45,52 +84,58 @@ function PanelNode({ node, ...props }: Props & { node: FoldNode }) {
             <mesh
                 geometry={geometry}
                 rotation={[Math.PI / 2, 0, 0]}
-                castShadow
+                castShadow={!props.transparent}
                 receiveShadow
                 onClick={(e) => {
                     e.stopPropagation();
                     props.onSelectPanel?.(node.panel.id);
                 }}
             >
-                {/* ExtrudeGeometry groups: 0 = caps (top/bottom faces), 1 = side walls. */}
                 <meshStandardMaterial
                     attach="material-0"
-                    color={outside}
-                    emissive={selected ? '#4f46e5' : '#000000'}
-                    emissiveIntensity={selected ? 0.25 : 0}
-                    roughness={0.85}
-                    side={DoubleSide}
+                    color={props.insideTexture ? '#ffffff' : props.insideColor}
+                    map={props.insideTexture ?? null}
+                    roughness={0.9}
+                    {...transparency}
+                    {...highlight}
                 />
-                <meshStandardMaterial attach="material-1" color={props.insideColor} roughness={0.9} />
+                <meshStandardMaterial attach="material-1" color={EDGE_COLOR} roughness={0.95} {...transparency} />
+                <meshStandardMaterial
+                    attach="material-2"
+                    color={props.outsideTexture ? '#ffffff' : (faceColor ?? props.outsideColor)}
+                    map={props.outsideTexture ?? null}
+                    roughness={0.8}
+                    {...transparency}
+                    {...highlight}
+                />
             </mesh>
             {node.children.map((child) => (
-                <PanelNode key={child.panel.id} node={child} {...props} />
+                <PanelNode key={child.panel.id} node={child} sheet={sheet} {...props} />
             ))}
         </group>
     );
 }
 
-/**
- * Folds the dieline panels around their hinges. Week 1 prototype: both faces of a panel
- * share one colour; Sprint 1 swaps the cap material for the 2D canvas texture.
- */
-export default function FoldedBox(props: Props) {
-    const roots = useMemo(() => buildFoldTree(props.result.panels), [props.result]);
-    const base = props.result.panels.find((p) => !p.parentId);
+/** Folds the dieline panels around their hinges and stands the box on the ground, centred. */
+export default function FoldedBox({ result, style, ...props }: Props) {
+    const roots = useMemo(() => buildFoldTree(result.panels), [result]);
+    const orientation = useMemo(() => styleOrientation(style), [style]);
+    const sheet = result.overallSize;
 
-    // Centre the box on the base panel so camera presets can look at the origin.
-    const centre = useMemo(() => {
-        if (!base) return { x: 0, y: 0 };
-        const xs = base.polygon.map((p) => p.x);
-        const ys = base.polygon.map((p) => p.y);
-        return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
-    }, [base]);
+    // Centre on the fully folded box (not the current fold) so it does not drift while folding.
+    const offset = useMemo<[number, number, number]>(() => {
+        const box = foldedBounds(result.panels, 1, orientation);
+        const centre = box.getCenter(new Vector3());
+        return [-centre.x, -box.min.y + props.thickness, -centre.z];
+    }, [result, orientation, props.thickness]);
 
     return (
-        <group position={[-centre.x, props.thickness, -centre.y]}>
-            {roots.map((root) => (
-                <PanelNode key={root.panel.id} node={root} {...props} />
-            ))}
+        <group position={offset}>
+            <group quaternion={orientation}>
+                {roots.map((root) => (
+                    <PanelNode key={root.panel.id} node={root} sheet={sheet} {...props} />
+                ))}
+            </group>
         </group>
     );
 }

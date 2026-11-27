@@ -1,10 +1,13 @@
+import { ElementsPanel, TextPanel, UploadsPanel } from '@/components/editor/AddPanels';
 import BottomToolbar from '@/components/editor/BottomToolbar';
 import BoxSettings from '@/components/editor/BoxSettings';
 import DielineCanvas, { type CanvasController } from '@/components/editor/DielineCanvas';
 import EditorSidebar from '@/components/editor/EditorSidebar';
 import RightPanel from '@/components/editor/RightPanel';
+import SelectionToolbar from '@/components/editor/SelectionToolbar';
 import type { ProductItem } from '@/components/editor/types';
 import { useDieline } from '@/hooks/use-dieline';
+import { useSheetTextures } from '@/hooks/use-sheet-textures';
 import { useEditorStore } from '@/store/useEditorStore';
 import { Head } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
@@ -21,10 +24,14 @@ export default function EditorPage({ products, activeProduct }: EditorPageProps)
     const faceColors = useEditorStore((s) => s.design.faceColors);
     const selectedPanelId = useEditorStore((s) => s.selectedPanelId);
     const setSelectedPanelId = useEditorStore((s) => s.setSelectedPanelId);
+    const outsideObjects = useEditorStore((s) => s.design.outside);
+    const insideObjects = useEditorStore((s) => s.design.inside);
 
     const { params, result, errors, supported } = useDieline();
     const controller = useRef<CanvasController>(null);
     const [zoom, setZoom] = useState(1);
+    const textures = useSheetTextures(result, outsideObjects, insideObjects, faceColors, material);
+    const sheet = result ? result.overallSize : null;
 
     const pickProduct = (product: ProductItem) => {
         setSelectedPanelId(null);
@@ -66,7 +73,14 @@ export default function EditorPage({ products, activeProduct }: EditorPageProps)
         <>
             <Head title={activeProduct ? `${activeProduct.name} — Dieline Editor` : 'Dieline Editor'} />
             <div className="flex h-screen w-screen overflow-hidden bg-slate-100 text-slate-900">
-                <EditorSidebar boxPanel={<BoxSettings products={products} params={params} errors={errors} onPickProduct={pickProduct} />} />
+                <EditorSidebar
+                    panels={{
+                        box: <BoxSettings products={products} params={params} errors={errors} onPickProduct={pickProduct} />,
+                        uploads: <UploadsPanel sheet={sheet} />,
+                        elements: <ElementsPanel sheet={sheet} />,
+                        text: <TextPanel sheet={sheet} />,
+                    }}
+                />
 
                 <main className="relative flex min-w-0 flex-1 flex-col">
                     <div className="relative flex-1">
@@ -87,17 +101,18 @@ export default function EditorPage({ products, activeProduct }: EditorPageProps)
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-100/80">
                                 <div className="rounded-xl border border-slate-200 bg-white px-6 py-5 text-center text-sm text-slate-600 shadow-sm">
                                     {canvasNotice}
-                                    <div className="mt-1 text-xs text-slate-400">Pick the Mailer Box to try the engine.</div>
+                                    <div className="mt-1 text-xs text-slate-400">Folding styles (Mailer, Tuck, Burger, Tray, Sleeve) work today.</div>
                                 </div>
                             </div>
                         )}
                     </div>
-                    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+                    <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2">
+                        <SelectionToolbar />
                         <BottomToolbar controller={controller} zoom={zoom} />
                     </div>
                 </main>
 
-                <RightPanel result={result} params={params} />
+                <RightPanel result={result} params={params} textures={textures} />
             </div>
         </>
     );

@@ -15,7 +15,7 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        User::firstOrCreate(
+        $admin = User::firstOrCreate(
             ['email' => 'admin@dieline.local'],
             [
                 'name' => 'Admin User',
@@ -23,6 +23,8 @@ class DatabaseSeeder extends Seeder
                 'email_verified_at' => now(),
             ]
         );
+        // is_admin is deliberately not mass assignable (registration must never set it).
+        $admin->forceFill(['is_admin' => true])->save();
 
         $this->call(ProductSeeder::class);
     }

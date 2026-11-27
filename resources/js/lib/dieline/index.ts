@@ -1,6 +1,8 @@
 import type { BoxParams, BoxStyle, DielineResult } from '../../types/design';
 import { toMm } from './geometry';
 import { generateMailer } from './styles/mailer';
+import { generateBurger, generateSleeve, generateTray } from './styles/trays';
+import { generateReverseTuck, generateStraightTuck } from './styles/tuck';
 
 export * from './geometry';
 export { BLEED_MM, buildDielineResult, SAFE_MM } from './result';
@@ -10,6 +12,11 @@ type Generator = (params: BoxParams) => DielineResult;
 /** Styles the engine can generate today. The rest land in Sprint 1–3 (see the implementation plan). */
 const GENERATORS: Partial<Record<BoxStyle, Generator>> = {
     mailer: generateMailer,
+    'reverse-tuck': generateReverseTuck,
+    'straight-tuck': generateStraightTuck,
+    burger: generateBurger,
+    tray: generateTray,
+    sleeve: generateSleeve,
 };
 
 export const SUPPORTED_STYLES = Object.keys(GENERATORS) as BoxStyle[];

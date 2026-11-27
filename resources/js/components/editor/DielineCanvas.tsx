@@ -15,6 +15,8 @@ export type CanvasController = {
     group: () => void;
     /** Splits the selected group back into its objects (Ctrl+Shift+G). */
     ungroup: () => void;
+    /** True while a Fabric text object is actively being edited on the canvas. */
+    isEditingText: () => boolean;
 };
 
 type Props = {
@@ -46,7 +48,7 @@ const COLORS = {
 /** Marks objects that belong to the locked dieline layer (not user content, not exported as design). */
 const DIELINE_LAYER = 'dieline-layer';
 
-type LayerObject = FabricObject & { layer?: string; panelId?: string };
+type LayerObject = FabricObject & { layer?: string; panelId?: string; taggedLineId?: string; taggedLineTag?: 'cut' | 'fold' };
 
 const isTyping = () => {
     const el = document.activeElement as HTMLElement | null;
@@ -67,6 +69,9 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
 
     // User objects: the store is the source of truth, Fabric shows it.
     const activePart = useEditorStore((s) => s.activePart);
+    const showTurnInWarning = useEditorStore((s) => s.showTurnInWarning);
+    const lineTaggingMode = useEditorStore((s) => s.lineTaggingMode);
+    const source = useEditorStore((s) => s.design.source);
     const objects = useEditorStore((s) => surfaceObjects(s.design, s.activePart, side));
     const selectedObjectIds = useEditorStore((s) => s.selectedObjectIds);
     const fabricObjects = useRef(new Map<string, BoundObject>());
@@ -197,6 +202,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             getZoom: () => canvasRef.current?.getZoom() ?? 1,
             group: groupSelection,
             ungroup: ungroupSelection,
+            isEditingText: () => canvasRef.current?.getActiveObjects().some((o) => o instanceof Textbox && o.isEditing) ?? false,
         }),
         [fit, zoomBy, groupSelection, ungroupSelection],
     );
@@ -240,7 +246,12 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
                 canvas.setCursor('grabbing');
                 return;
             }
-            const target = opt.target as (FabricObject & { panelId?: string }) | undefined;
+            const target = opt.target as LayerObject | undefined;
+            if (target?.taggedLineId && target.taggedLineTag) {
+                const nextTag = target.taggedLineTag === 'cut' ? 'fold' : 'cut';
+                useEditorStore.getState().setUploadedLineTag(target.taggedLineId, nextTag);
+                return;
+            }
             onSelectPanelRef.current(target?.panelId ?? null);
         };
 
@@ -423,6 +434,22 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
         );
 
         const lineStyle = { ...locked, evented: false, fill: '' };
+        const turnInShades = showTurnInWarning
+            ? result.panels
+                  .filter((p) => p.id.includes('turnin-'))
+                  .map(
+                      (p) =>
+                          new Polygon(polygon(p.polygon), {
+                              ...locked,
+                              evented: false,
+                              fill: 'rgba(245, 158, 11, 0.22)',
+                              stroke: '#d97706',
+                              strokeWidth: 0.75,
+                              strokeDashArray: [3, 2],
+                          }),
+                  )
+            : [];
+
         const lines = [
             new Path(path(result.bleedPath), { ...lineStyle, stroke: COLORS.bleed, strokeWidth: 1, strokeDashArray: [6, 4] }),
             new Path(path(result.safePath), { ...lineStyle, stroke: COLORS.safe, strokeWidth: 0.75, strokeDashArray: [2, 3] }),
@@ -430,10 +457,28 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             ...result.creasePaths.map((d) => new Path(path(d), { ...lineStyle, stroke: COLORS.crease, strokeWidth: 1, strokeDashArray: [5, 4] })),
         ];
 
-        // Panels stay separate objects so they can be clicked; the line work is one non-interactive group.
-        const linesGroup = new Group(lines, { ...locked, evented: false, subTargetCheck: false });
+        const uploadedLines =
+            source.kind === 'uploaded-dieline' && source.lines?.length
+                ? source.lines.map((l) =>
+                      Object.assign(
+                          new Path(path(l.path), {
+                              ...locked,
+                              fill: '',
+                              evented: lineTaggingMode,
+                              hoverCursor: lineTaggingMode ? 'pointer' : 'default',
+                              stroke: l.tag === 'cut' ? COLORS.cut : COLORS.crease,
+                              strokeWidth: lineTaggingMode ? 2.2 : 1.25,
+                              strokeDashArray: l.tag === 'fold' ? [5, 4] : null,
+                          }),
+                          { taggedLineId: l.id, taggedLineTag: l.tag },
+                      ),
+                  )
+                : [];
 
-        const layer = [...panelObjects, linesGroup];
+        // Panels stay separate objects so they can be clicked; the line work is one non-interactive group.
+        const linesGroup = new Group([...turnInShades, ...lines], { ...locked, evented: false, subTargetCheck: false });
+
+        const layer = [...panelObjects, linesGroup, ...uploadedLines];
         layer.forEach((obj) => Object.assign(obj, { layer: DIELINE_LAYER }));
         canvas.add(...layer);
         restack();
@@ -445,7 +490,7 @@ export default function DielineCanvas({ result, side, material, faceColors, sele
             fittedFor.current = key;
             fit();
         }
-    }, [result, side, material, faceColors, selectedPanelId, fit, restack]);
+    }, [result, side, material, faceColors, selectedPanelId, showTurnInWarning, lineTaggingMode, source, fit, restack]);
 
     // Store -> Fabric: add, update, remove and reorder user objects for the visible side.
     useEffect(() => {

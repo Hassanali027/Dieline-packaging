@@ -2,9 +2,18 @@ import { ApiError, listUploads, MAX_UPLOAD_BYTES, UPLOAD_ACCEPT, uploadImage, ty
 import { ensureFont, FONT_COMBOS, QUICK_TEXTS } from '@/lib/fonts';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
-import { Circle, Loader2, Minus, Square, Triangle, Upload } from 'lucide-react';
+import { Barcode, Circle, Loader2, Minus, QrCode, Square, Triangle, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { makeImage, makeShape, makeText, makeTextWith, type ShapeKind, type SheetFrame, type TextPreset } from './objects';
+import {
+    BARCODE_FORMATS,
+    generateBarcodeDataUrl,
+    generateQrDataUrl,
+    validateBarcodeInput,
+    validateQrInput,
+    type BarcodeFormat,
+    type QrErrorCorrection,
+} from './codes';
+import { makeBarcode, makeImage, makeQr, makeShape, makeText, makeTextWith, type ShapeKind, type SheetFrame, type TextPreset } from './objects';
 
 type PanelProps = { sheet: SheetFrame | null };
 
@@ -230,6 +239,255 @@ export function UploadsPanel({ sheet }: PanelProps) {
                             </button>
                         ))}
                     </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+/* ------------------------------------------------------------------ */
+/* QR & Barcodes                                                       */
+/* ------------------------------------------------------------------ */
+
+export function QrBarcodePanel({ sheet }: PanelProps) {
+    const { side, addObject } = useAdd();
+    const [mode, setMode] = useState<'qr' | 'barcode'>('qr');
+
+    // QR state
+    const [qrValue, setQrValue] = useState('https://example.com');
+    const [qrEcc, setQrEcc] = useState<QrErrorCorrection>('M');
+    const [qrColor, setQrColor] = useState('#0f172a');
+    const [qrBg, setQrBg] = useState('#ffffff');
+
+    // Barcode state
+    const [format, setFormat] = useState<BarcodeFormat>('CODE128');
+    const [barValue, setBarValue] = useState('PKG-2026-001');
+    const [barColor, setBarColor] = useState('#0f172a');
+    const [displayValue, setDisplayValue] = useState(true);
+
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+
+    const formatInfo = BARCODE_FORMATS.find((f) => f.id === format) ?? BARCODE_FORMATS[0];
+
+    const switchMode = (next: 'qr' | 'barcode') => {
+        setMode(next);
+        setError(null);
+    };
+
+    const addQr = async () => {
+        if (!sheet) return;
+        const msg = validateQrInput(qrValue);
+        if (msg) {
+            setError(msg);
+            return;
+        }
+        setError(null);
+        setBusy(true);
+        try {
+            const src = await generateQrDataUrl(qrValue, { color: qrColor, background: qrBg, ecc: qrEcc });
+            addObject(side, makeQr({ src, value: qrValue.trim(), ecc: qrEcc, color: qrColor, background: qrBg }, side, sheet));
+        } catch (e) {
+            setError((e as Error).message || 'Could not generate QR code.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const addBarcode = () => {
+        if (!sheet) return;
+        const msg = validateBarcodeInput(format, barValue);
+        if (msg) {
+            setError(msg);
+            return;
+        }
+        setError(null);
+        try {
+            const { src, width, height } = generateBarcodeDataUrl(format, barValue, {
+                lineColor: barColor,
+                background: '#ffffff',
+                displayValue,
+            });
+            addObject(
+                side,
+                makeBarcode(
+                    { src, format, value: barValue.trim(), width, height, color: barColor, background: '#ffffff', displayValue },
+                    side,
+                    sheet,
+                ),
+            );
+        } catch (e) {
+            setError((e as Error).message || 'Invalid barcode value for the selected format.');
+        }
+    };
+
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+                <button
+                    type="button"
+                    onClick={() => switchMode('qr')}
+                    className={cn(
+                        'flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition',
+                        mode === 'qr' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900',
+                    )}
+                >
+                    <QrCode className="size-3.5" />
+                    QR Code
+                </button>
+                <button
+                    type="button"
+                    onClick={() => switchMode('barcode')}
+                    className={cn(
+                        'flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition',
+                        mode === 'barcode' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900',
+                    )}
+                >
+                    <Barcode className="size-3.5" />
+                    Barcode
+                </button>
+            </div>
+
+            {mode === 'qr' ? (
+                <div className="flex flex-col gap-3">
+                    <label className="flex flex-col gap-1">
+                        <span className="text-[11px] font-medium text-slate-600">URL or text</span>
+                        <textarea
+                            rows={2}
+                            value={qrValue}
+                            onChange={(e) => {
+                                setQrValue(e.target.value);
+                                if (error) setError(null);
+                            }}
+                            placeholder="https://yourbrand.com"
+                            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-violet-400"
+                        />
+                    </label>
+
+                    <div className="grid grid-cols-3 gap-2">
+                        <label className="flex flex-col gap-1">
+                            <span className="text-[11px] font-medium text-slate-600">Correction</span>
+                            <select
+                                value={qrEcc}
+                                onChange={(e) => setQrEcc(e.target.value as QrErrorCorrection)}
+                                className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-900"
+                            >
+                                <option value="L">L (7%)</option>
+                                <option value="M">M (15%)</option>
+                                <option value="Q">Q (25%)</option>
+                                <option value="H">H (30%)</option>
+                            </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                            <span className="text-[11px] font-medium text-slate-600">Modules</span>
+                            <input
+                                type="color"
+                                value={qrColor}
+                                onChange={(e) => setQrColor(e.target.value)}
+                                className="h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5"
+                            />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                            <span className="text-[11px] font-medium text-slate-600">Background</span>
+                            <input
+                                type="color"
+                                value={qrBg}
+                                onChange={(e) => setQrBg(e.target.value)}
+                                className="h-8 w-full cursor-pointer rounded-lg border border-slate-200 bg-white p-0.5"
+                            />
+                        </label>
+                    </div>
+
+                    {error && (
+                        <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                            {error}
+                        </p>
+                    )}
+
+                    <button
+                        type="button"
+                        disabled={!sheet || busy}
+                        onClick={() => void addQr()}
+                        className="flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-violet-600 disabled:opacity-40"
+                    >
+                        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <QrCode className="size-3.5" />}
+                        Add QR code
+                    </button>
+                </div>
+            ) : (
+                <div className="flex flex-col gap-3">
+                    <label className="flex flex-col gap-1">
+                        <span className="text-[11px] font-medium text-slate-600">Barcode format</span>
+                        <select
+                            value={format}
+                            onChange={(e) => {
+                                const next = e.target.value as BarcodeFormat;
+                                setFormat(next);
+                                const info = BARCODE_FORMATS.find((f) => f.id === next);
+                                if (info) setBarValue(info.placeholder);
+                                setError(null);
+                            }}
+                            className="h-9 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-900"
+                        >
+                            {BARCODE_FORMATS.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                    {f.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1">
+                        <span className="text-[11px] font-medium text-slate-600">Code value</span>
+                        <input
+                            type="text"
+                            value={barValue}
+                            onChange={(e) => {
+                                setBarValue(e.target.value);
+                                if (error) setError(null);
+                            }}
+                            placeholder={formatInfo.placeholder}
+                            className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none focus:border-violet-400"
+                        />
+                        <span className="text-[10.5px] text-slate-400">{formatInfo.hint}</span>
+                    </label>
+
+                    <div className="flex items-center justify-between gap-2">
+                        <label className="flex items-center gap-2 text-xs text-slate-600">
+                            <input
+                                type="checkbox"
+                                checked={displayValue}
+                                onChange={(e) => setDisplayValue(e.target.checked)}
+                                className="rounded border-slate-300 text-violet-600"
+                            />
+                            Show text below bars
+                        </label>
+                        <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                            Bars
+                            <input
+                                type="color"
+                                value={barColor}
+                                onChange={(e) => setBarColor(e.target.value)}
+                                className="h-7 w-8 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+                            />
+                        </label>
+                    </div>
+
+                    {error && (
+                        <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                            {error}
+                        </p>
+                    )}
+
+                    <button
+                        type="button"
+                        disabled={!sheet}
+                        onClick={addBarcode}
+                        className="flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-violet-600 disabled:opacity-40"
+                    >
+                        <Barcode className="size-3.5" />
+                        Add barcode
+                    </button>
                 </div>
             )}
         </div>

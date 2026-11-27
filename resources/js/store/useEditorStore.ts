@@ -1,8 +1,8 @@
-import { create } from 'zustand';
-import { temporal } from 'zundo';
 import type { BoxParams, BoxSource, CanvasObject, Design } from '@/types/design';
+import { temporal } from 'zundo';
+import { create } from 'zustand';
 
-export type EditorTab = 'uploads' | 'elements' | 'text' | 'inspirations' | 'qr';
+export type EditorTab = 'box' | 'uploads' | 'elements' | 'text' | 'inspirations' | 'qr';
 export type BoxSide = 'outside' | 'inside';
 export type CameraPreset = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 
@@ -42,7 +42,7 @@ const defaultParams: BoxParams = {
 export const useEditorStore = create<EditorState>()(
     temporal(
         (set) => ({
-            activeTab: 'uploads',
+            activeTab: 'box',
             activeSide: 'outside',
             foldProgress: 0.9,
             xRay: false,

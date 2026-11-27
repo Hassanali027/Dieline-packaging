@@ -7,9 +7,10 @@ import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { surfaceObjects, useEditorStore, type CameraPreset } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
-import { AlertTriangle, Box, Download, Eye, Layers, MousePointerClick, Ruler, Scissors, Sparkles } from 'lucide-react';
-import { lazy, Suspense, type ReactNode } from 'react';
+import { AlertTriangle, Box, Download, Eye, FileText, Layers, Loader2, MousePointerClick, Ruler, Scissors, Sparkles } from 'lucide-react';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { LOW_PRINT_DPI, lowDpiImages } from './objects';
+import { exportPrintPdf } from './printPdf';
 
 // Three.js is large; load the 3D view in its own chunk so the 2D editor paints first.
 const Preview3D = lazy(() => import('@/components/preview3d/Preview3D'));
@@ -356,7 +357,49 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     <Download className="size-4 text-slate-400 transition group-hover:text-violet-600" />
                 </button>
             )}
+
+            {result && <PrintPdfButton result={result} params={params} />}
         </aside>
+    );
+}
+
+/** Builds the print PDF (all sheets, 300 DPI artwork, spot-colour cut / crease, crop marks). */
+function PrintPdfButton({ result, params }: { result: DielineResult; params: BoxParams | null }) {
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const run = async () => {
+        setBusy(true);
+        setError(null);
+        try {
+            const { design, designMeta } = useEditorStore.getState();
+            await exportPrintPdf(result, design, params, designMeta.name || 'Box design');
+        } catch (e) {
+            setError((e as Error).message || 'Could not build the PDF.');
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div className="shrink-0">
+            <button
+                type="button"
+                onClick={() => void run()}
+                disabled={busy}
+                className="group flex w-full items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-3 text-left transition hover:border-violet-300 hover:shadow-md hover:shadow-violet-100 disabled:opacity-60"
+            >
+                <span className="flex size-10 items-center justify-center rounded-xl bg-slate-900 text-white transition group-hover:bg-violet-600">
+                    {busy ? <Loader2 className="size-4 animate-spin" /> : <FileText className="size-4" />}
+                </span>
+                <span className="flex-1">
+                    <span className="block text-sm font-semibold text-slate-900">{busy ? 'Preparing PDF…' : 'Download print PDF'}</span>
+                    <span className="block text-[11px] text-slate-500">300 DPI artwork · CutContour & Crease spot colours · crop marks</span>
+                </span>
+                <Download className="size-4 text-slate-400 transition group-hover:text-violet-600" />
+            </button>
+            {error && <p className="mt-1.5 rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700">{error}</p>}
+        </div>
     );
 }
 

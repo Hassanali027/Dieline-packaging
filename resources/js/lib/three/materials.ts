@@ -1,4 +1,5 @@
-import type { Design } from '../../types/design';
+import { useSyncExternalStore } from 'react';
+import type { BoxParams, Design } from '../../types/design';
 
 // Keep this file free of `three` imports: the 2D editor bundles it (vite.config.js puts it in
 // the 'editor-core' chunk), and importing Three.js here pulls all of Three into that chunk and
@@ -11,19 +12,63 @@ export type MaterialSpec = {
     inside: string;
     roughness: number;
     bumpScale: number;
+    /** Box constructions that may use it (all when missing). */
+    constructions?: BoxParams['construction'][];
 };
 
 /** Base board and wrap-paper materials shared by the 2D canvas and the 3D preview. */
 export const MATERIAL_COLORS: Record<string, MaterialSpec> = {
     white: { label: 'White', outside: '#f8fafc', inside: '#eef1f4', roughness: 0.78, bumpScale: 0 },
     kraft: { label: 'Kraft', outside: '#c8a27a', inside: '#b98f63', roughness: 0.92, bumpScale: 0.14 },
-    transparent: { label: 'Transparent', outside: '#e6f0f7', inside: '#e6f0f7', roughness: 0.15, bumpScale: 0 },
-    'wrap-paper': { label: 'Wrap Paper', outside: '#f4f1ea', inside: '#e9e4d8', roughness: 0.68, bumpScale: 0.08 },
-    linen: { label: 'Linen', outside: '#ede7dc', inside: '#e2dacb', roughness: 0.88, bumpScale: 0.35 },
-    leatherette: { label: 'Leatherette', outside: '#2b2d34', inside: '#3a3d45', roughness: 0.56, bumpScale: 0.45 },
+    transparent: { label: 'Transparent', outside: '#e6f0f7', inside: '#e6f0f7', roughness: 0.15, bumpScale: 0, constructions: ['folding'] },
+    'wrap-paper': { label: 'Wrap Paper', outside: '#f4f1ea', inside: '#e9e4d8', roughness: 0.68, bumpScale: 0.08, constructions: ['rigid'] },
+    linen: { label: 'Linen', outside: '#ede7dc', inside: '#e2dacb', roughness: 0.88, bumpScale: 0.35, constructions: ['rigid'] },
+    leatherette: { label: 'Leatherette', outside: '#2b2d34', inside: '#3a3d45', roughness: 0.56, bumpScale: 0.45, constructions: ['rigid'] },
 };
 
+/** The built-in materials (used until the admin library has loaded, or when it is empty). */
 export const MATERIAL_OPTIONS = Object.entries(MATERIAL_COLORS).map(([value, m]) => ({ value, label: m.label }));
+
+/** A material from the admin library (Filament → /api/library). */
+export type RegisteredMaterial = MaterialSpec & { slug: string };
+
+/** Slugs of the admin's active materials, in their order; null until the library has loaded. */
+let adminSlugs: string[] | null = null;
+let version = 0;
+const listeners = new Set<() => void>();
+
+/**
+ * Adds the admin's materials (they win over a built-in with the same slug). From then on the
+ * picker offers exactly the admin's active list; built-ins stay known so older designs still
+ * draw in the right colour.
+ */
+export function registerMaterials(materials: RegisteredMaterial[]): void {
+    for (const { slug, ...spec } of materials) MATERIAL_COLORS[slug] = spec;
+    adminSlugs = materials.length ? materials.map((m) => m.slug) : null;
+    version++;
+    listeners.forEach((l) => l());
+}
+
+/** Re-renders a component when admin materials arrive (colours, picker). */
+export function useMaterialsVersion(): number {
+    return useSyncExternalStore(
+        (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        () => version,
+        () => version,
+    );
+}
+
+/** Materials the picker offers for a construction (all of them when none is given). */
+export function materialOptions(construction?: BoxParams['construction']): { value: string; label: string }[] {
+    const slugs = adminSlugs ?? Object.keys(MATERIAL_COLORS).filter((slug) => MATERIAL_OPTIONS.some((o) => o.value === slug));
+    return slugs
+        .map((value) => ({ value, spec: MATERIAL_COLORS[value] }))
+        .filter(({ spec }) => spec && (!construction || !spec.constructions?.length || spec.constructions.includes(construction)))
+        .map(({ value, spec }) => ({ value, label: spec.label }));
+}
 
 export function materialColor(material: Design['material'], side: 'outside' | 'inside'): string {
     const known = MATERIAL_COLORS[material];

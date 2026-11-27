@@ -62,7 +62,7 @@ export function rigidSizes(params: BoxParams): RigidSizes {
 }
 
 /** Wrap for one chipboard tray of outer size length × width × height. */
-function wrapPanels(part: 'lid' | 'base', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
+export function wrapPanels(part: 'lid' | 'base', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
     const Lo = length;
     const Wo = width;
     const H = height;
@@ -139,7 +139,7 @@ function wrapPanels(part: 'lid' | 'base', length: number, width: number, height:
 }
 
 /** Liner: inside floor plus the inside walls below the turn-in. */
-function linerPanels(length: number, width: number, wall: number): Panel[] {
+export function linerPanels(length: number, width: number, wall: number): Panel[] {
     const floor: Panel = { id: 'liner-floor', name: 'Liner Floor', polygon: rect(0, 0, length, width), foldAngle: 0, side: 'outside', part: 'liner' };
     if (wall < 3) return [floor];
     const w = wall;
@@ -190,14 +190,8 @@ function chipboardList(s: RigidSizes): ChipboardPiece[] {
 /** Gap between parts when they share one sheet, mm. */
 const PART_GAP = 25;
 
-export function rigidLidBasePanels(params: BoxParams): { panels: Panel[]; sizes: RigidSizes } {
-    const s = rigidSizes(params);
-    const groups = [
-        wrapPanels('lid', s.lid.length, s.lid.width, s.lid.height, s.turnIn, s.board),
-        wrapPanels('base', s.base.length, s.base.width, s.base.height, s.turnIn, s.board),
-        linerPanels(s.liner.length, s.liner.width, s.liner.wall),
-    ];
-    // Lay the parts out left to right, top-aligned, so a combined sheet never overlaps.
+/** Lays the parts of a rigid box out left to right, top-aligned, so a combined sheet never overlaps. */
+export function layoutParts(groups: Panel[][]): Panel[] {
     const panels: Panel[] = [];
     let x = 0;
     for (const group of groups) {
@@ -213,6 +207,16 @@ export function rigidLidBasePanels(params: BoxParams): { panels: Panel[]; sizes:
         }
         x += b.width + PART_GAP;
     }
+    return panels;
+}
+
+export function rigidLidBasePanels(params: BoxParams): { panels: Panel[]; sizes: RigidSizes } {
+    const s = rigidSizes(params);
+    const panels = layoutParts([
+        wrapPanels('lid', s.lid.length, s.lid.width, s.lid.height, s.turnIn, s.board),
+        wrapPanels('base', s.base.length, s.base.width, s.base.height, s.turnIn, s.board),
+        linerPanels(s.liner.length, s.liner.width, s.liner.wall),
+    ]);
     return { panels, sizes: s };
 }
 

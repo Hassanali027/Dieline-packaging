@@ -1,4 +1,5 @@
 import { buildFoldTree, nodeQuaternion, type FoldNode } from '@/lib/three/foldTree';
+import { layerFade, panelLayers } from '@/lib/three/layers';
 import type { ResolvedFinishProps } from '@/lib/three/materials';
 import type { DielineResult } from '@/types/design';
 import { useEffect, useMemo } from 'react';
@@ -83,6 +84,8 @@ function usePanelGeometry(node: FoldNode, thickness: number, sheet: { width: num
 type NodeProps = Omit<Props, 'result' | 'orientation' | 'position' | 'hingeRotation'> & {
     node: FoldNode;
     sheet: { width: number; height: number };
+    /** Stacking layer per panel when closed (lib/three/layers.ts). */
+    layers: Map<string, number>;
 };
 
 function PanelNode({ node, sheet, ...props }: NodeProps) {
@@ -103,12 +106,16 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
     const highlight = { emissive: selected ? '#4f46e5' : '#000000', emissiveIntensity: selected ? 0.25 : 0 };
     const finish = props.finishProps;
     const outsideBaseColor = finish?.foilTint ?? faceColor ?? props.outsideColor;
+    // Flaps that close flat against a wall sit one board further in per layer (+Y = inwards),
+    // instead of sharing the wall's plane and flickering through it.
+    const lift = (props.layers.get(node.panel.id) ?? 0) * props.thickness * layerFade(props.progress);
 
     return (
         <group position={node.offset} quaternion={quaternion}>
             {/* Shape XY → world XZ: rotate +90° about X so (x, y, 0) lands on (x, 0, y). */}
             <mesh
                 geometry={geometry}
+                position={[0, lift, 0]}
                 rotation={[Math.PI / 2, 0, 0]}
                 castShadow={!translucent}
                 receiveShadow
@@ -136,7 +143,9 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
                     {...transparency}
                 />
                 <meshPhysicalMaterial
-                    key={`m2-${translucent}`}
+                    // A bump map appearing, going or changing needs a new shader too (paper grain,
+                    // emboss / deboss relief): remount rather than leave three on the old program.
+                    key={`m2-${translucent}-${props.bumpMap?.uuid ?? 'flat'}`}
                     attach="material-2"
                     color={props.outsideTexture ? (finish?.foilTint ?? '#ffffff') : outsideBaseColor}
                     map={props.outsideTexture ?? null}
@@ -161,6 +170,7 @@ function PanelNode({ node, sheet, ...props }: NodeProps) {
 /** Folds one piece's panels around their hinges and puts it where the assembly says. */
 export default function FoldedBox({ result, orientation, position, hingeRotation, ...props }: Props) {
     const roots = useMemo(() => buildFoldTree(result.panels), [result]);
+    const layers = useMemo(() => panelLayers(result.panels), [result]);
     const sheet = result.overallSize;
 
     const hingeQuaternion = useMemo(() => {
@@ -176,7 +186,7 @@ export default function FoldedBox({ result, orientation, position, hingeRotation
                 <group position={relPos}>
                     <group quaternion={orientation}>
                         {roots.map((root) => (
-                            <PanelNode key={root.panel.id} node={root} sheet={sheet} {...props} />
+                            <PanelNode key={root.panel.id} node={root} sheet={sheet} layers={layers} {...props} />
                         ))}
                     </group>
                 </group>
@@ -188,7 +198,7 @@ export default function FoldedBox({ result, orientation, position, hingeRotation
         <group position={position}>
             <group quaternion={orientation}>
                 {roots.map((root) => (
-                    <PanelNode key={root.panel.id} node={root} sheet={sheet} {...props} />
+                    <PanelNode key={root.panel.id} node={root} sheet={sheet} layers={layers} {...props} />
                 ))}
             </group>
         </group>

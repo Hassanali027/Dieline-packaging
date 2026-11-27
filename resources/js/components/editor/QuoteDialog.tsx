@@ -5,6 +5,7 @@ import { useEditorStore } from '@/store/useEditorStore';
 import type { BoxParams } from '@/types/design';
 import { CheckCircle2, Loader2, ReceiptText } from 'lucide-react';
 import { useState, type FormEvent, type ReactNode } from 'react';
+import TurnstileWidget, { useTurnstileSiteKey } from './TurnstileWidget';
 
 type Construction = 'folding' | 'corrugated' | 'rigid';
 
@@ -66,6 +67,9 @@ export default function QuoteDialog({ params, getPreviews }: Props) {
     const [busy, setBusy] = useState(false);
     const [done, setDone] = useState<number | null>(null);
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const siteKey = useTurnstileSiteKey();
+    const [captcha, setCaptcha] = useState<string | null>(null);
+    const [captchaRound, setCaptchaRound] = useState(0);
     const [form, setForm] = useState<QuoteRequest & { attachPreviews: boolean }>(() => blank(params));
 
     // Fresh box details every time the dialog opens; contact details are kept.
@@ -113,6 +117,7 @@ export default function QuoteDialog({ params, getPreviews }: Props) {
                 inside_png: previews.inside,
                 paper: rigid ? request.paper : undefined,
                 insert_type: rigid ? request.insert_type : undefined,
+                turnstile_token: captcha ?? undefined,
             });
             setDone(data.id);
         } catch (err) {
@@ -123,6 +128,8 @@ export default function QuoteDialog({ params, getPreviews }: Props) {
                 const fieldErrors = Object.fromEntries(Object.entries(apiError.errors ?? {}).map(([k, v]) => [k, v[0]]));
                 setErrors(Object.keys(fieldErrors).length ? fieldErrors : { form: apiError.message });
             }
+            // A Turnstile token works once: get a fresh one for the next try.
+            if (siteKey) setCaptchaRound((n) => n + 1);
         } finally {
             setBusy(false);
         }
@@ -340,9 +347,16 @@ export default function QuoteDialog({ params, getPreviews }: Props) {
                                 <p className="text-xs text-rose-600">{errors.outside_png ?? errors.inside_png}</p>
                             )}
 
+                            {siteKey && (
+                                <div>
+                                    <TurnstileWidget siteKey={siteKey} onToken={setCaptcha} resetKey={captchaRound} />
+                                    {errors.turnstile_token && <p className="mt-1 text-xs text-rose-600">{errors.turnstile_token}</p>}
+                                </div>
+                            )}
+
                             <button
                                 type="submit"
-                                disabled={busy}
+                                disabled={busy || (!!siteKey && !captcha)}
                                 className="flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-violet-500 to-violet-700 text-sm font-semibold text-white shadow-md shadow-violet-500/30 disabled:opacity-60"
                             >
                                 {busy && <Loader2 className="size-4 animate-spin" />}

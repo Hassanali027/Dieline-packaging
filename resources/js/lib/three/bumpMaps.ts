@@ -1,5 +1,6 @@
 import { CanvasTexture, RepeatWrapping, type Texture } from 'three';
 import type { Design } from '../../types/design';
+import { MATERIAL_COLORS } from './materials';
 
 // Only the lazy 3D chunk imports this file (see the note at the top of materials.ts).
 
@@ -11,7 +12,9 @@ const bumpCache = new Map<string, Texture>();
  */
 export function getMaterialBumpMap(material: Design['material']): Texture | null {
     if (typeof document === 'undefined') return null;
-    if (material !== 'linen' && material !== 'leatherette' && material !== 'kraft' && material !== 'wrap-paper') {
+    // Built-in papers have their own grain; an admin material with a texture strength gets the
+    // generic paper grain (the last branch below).
+    if (!((MATERIAL_COLORS[material]?.bumpScale ?? 0) > 0)) {
         return null;
     }
     const cached = bumpCache.get(material);

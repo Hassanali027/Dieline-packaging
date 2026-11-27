@@ -116,6 +116,19 @@ function useSheetTexture(canvas: HTMLCanvasElement | null | undefined, version: 
     return texture;
 }
 
+/** How strongly the emboss / deboss height map lifts the surface in the 3D view. */
+const RELIEF_BUMP_SCALE = 4;
+
+/** The emboss / deboss height map as a texture (linear data, not a colour image). */
+function useReliefTexture(canvas: HTMLCanvasElement | null | undefined, version: number) {
+    const texture = useMemo(() => (canvas ? new CanvasTexture(canvas) : null), [canvas]);
+    useEffect(() => {
+        if (texture) texture.needsUpdate = true;
+    }, [texture, version]);
+    useEffect(() => () => texture?.dispose(), [texture]);
+    return texture;
+}
+
 export default function Preview3D({
     result: generatedResult,
     style,
@@ -168,7 +181,8 @@ export default function Preview3D({
                 gl={{ preserveDrawingBuffer: true, antialias: true, alpha: true }}
             >
                 {/* Transparent: the studio gradient behind the canvas is CSS (.editor-studio). */}
-                <hemisphereLight args={['#ffffff', '#4c4f72', 0.85]} />
+                {/* Neutral grey bounce from below: a blue-violet ground colour turned the box's underside navy. */}
+                <hemisphereLight args={['#ffffff', '#a3a7ae', 0.85]} />
                 <StudioEnvironment />
                 <directionalLight
                     position={[extent, extent * 2, extent * 1.5]}
@@ -227,7 +241,7 @@ function PieceBox({
     onSelectPanel,
 }: {
     piece: AssemblyPiece;
-    textures?: { outside: HTMLCanvasElement | null; inside: HTMLCanvasElement | null };
+    textures?: { outside: HTMLCanvasElement | null; inside: HTMLCanvasElement | null; relief?: HTMLCanvasElement | null };
     version: number;
     thickness: number;
     material: string;
@@ -240,6 +254,7 @@ function PieceBox({
 }) {
     const outsideTexture = useSheetTexture(textures?.outside, version, false);
     const insideTexture = useSheetTexture(textures?.inside, version, true);
+    const reliefTexture = useReliefTexture(textures?.relief, version);
     return (
         <FoldedBox
             result={piece.result}
@@ -249,8 +264,9 @@ function PieceBox({
             progress={piece.fold}
             outsideTexture={outsideTexture}
             insideTexture={insideTexture}
-            bumpMap={bumpMap}
-            finishProps={finishProps}
+            // Emboss / deboss relief wins over the paper grain (one bump map per face).
+            bumpMap={reliefTexture ?? bumpMap}
+            finishProps={reliefTexture ? { ...finishProps, bumpScale: RELIEF_BUMP_SCALE } : finishProps}
             transparent={material === 'transparent'}
             xRay={xRay}
             thickness={thickness}

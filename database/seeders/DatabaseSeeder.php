@@ -27,5 +27,6 @@ class DatabaseSeeder extends Seeder
         $admin->forceFill(['is_admin' => true])->save();
 
         $this->call(ProductSeeder::class);
+        $this->call(LibrarySeeder::class);
     }
 }

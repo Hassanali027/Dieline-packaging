@@ -1,7 +1,23 @@
 import { ALL_FONTS, ensureFont } from '@/lib/fonts';
 import { newObjectId, type BoxSide } from '@/store/useEditorStore';
-import type { CanvasObject } from '@/types/design';
-import { Ellipse, FabricImage, Group, Line, Rect, Textbox, Triangle, util, type FabricObject } from 'fabric';
+import type { CanvasObject, Pt } from '@/types/design';
+import {
+    Ellipse,
+    FabricImage,
+    FabricText,
+    Group,
+    Line,
+    Path,
+    Pattern,
+    Polygon,
+    Rect,
+    Shadow,
+    Textbox,
+    Triangle,
+    util,
+    type FabricObject,
+} from 'fabric';
+import { DEFAULT_TILE_MM, iconSrc, patternTileSrc } from './library';
 
 /**
  * Bridge between the store's CanvasObject JSON (the source of truth: undo, save, 3D texture)
@@ -28,10 +44,21 @@ const TEXT_PRESETS: Record<TextPreset, { text: string; fontSizePt: number; fontW
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' ? v : fallback);
 
+/**
+ * Emboss / deboss on the 2D sheet: a soft shadow below-right reads as raised, above-left as
+ * pressed in. (The 3D view shows the real relief from a height map, see textureCanvas.ts.)
+ */
+export function effectShadow(effect: CanvasObject['effect']): Shadow | null {
+    if (effect === 'emboss') return new Shadow({ color: 'rgba(15,23,42,0.45)', blur: 1.2, offsetX: 0.5, offsetY: 0.5 });
+    if (effect === 'deboss') return new Shadow({ color: 'rgba(15,23,42,0.45)', blur: 1.2, offsetX: -0.5, offsetY: -0.5 });
+    return null;
+}
+
 function commonOptions(obj: CanvasObject) {
     const p = obj.props;
     const locked = !!obj.locked;
     return {
+        shadow: effectShadow(obj.effect),
         originX: 'center' as const,
         originY: 'center' as const,
         left: num(p.left, 0),
@@ -91,7 +118,8 @@ export async function createFabricObject(obj: CanvasObject): Promise<BoundObject
     if (obj.type === 'text') {
         // Web fonts must be loaded before Fabric measures the text.
         await ensureFont(str(p.fontFamily, 'Arial'), str(p.fontWeight, 'normal'));
-        fo = new Textbox(str(p.text, 'Text'), { ...commonOptions(obj), ...textOptions(obj) });
+        const curve = textCurve(obj);
+        fo = curve ? curvedText(obj, curve) : new Textbox(str(p.text, 'Text'), { ...commonOptions(obj), ...textOptions(obj) });
     } else if (obj.type === 'shape') {
         const kind = str(p.shape, 'rect') as ShapeKind;
         const width = num(p.width, 40);
@@ -115,6 +143,15 @@ export async function createFabricObject(obj: CanvasObject): Promise<BoundObject
         } catch {
             return null;
         }
+    } else if (obj.type === 'icon') {
+        if (!str(p.svg, '')) return null;
+        try {
+            fo = await FabricImage.fromURL(iconSrc(obj), {}, commonOptions(obj));
+        } catch {
+            return null;
+        }
+    } else if (obj.type === 'pattern') {
+        fo = await createPattern(obj);
     } else if (obj.type === 'group') {
         // Children are stored relative to the group centre; Fabric fits the group around them
         // (centre = 0, 0), then the group's own transform is applied.
@@ -135,13 +172,95 @@ export async function createFabricObject(obj: CanvasObject): Promise<BoundObject
     return bound;
 }
 
+/** Curve of a text object, -100..100 (0 = straight; values under 1 count as straight). */
+export function textCurve(obj: CanvasObject): number {
+    const c = Math.max(-100, Math.min(100, num(obj.props.curve, 0)));
+    return Math.abs(c) < 1 ? 0 : c;
+}
+
+/**
+ * Text bent along a circular arc. The arc is exactly as long as the straight text, so the
+ * letters keep their size and spacing: curve 100 wraps the text almost all the way round a
+ * circle; positive arches it upwards (like a rainbow), negative bends it downwards (a smile).
+ * Curved text is one line (line breaks become spaces).
+ */
+function curvedText(obj: CanvasObject, curve: number): FabricObject {
+    const t = textOptions(obj);
+    const text = t.text.replace(/\s*\n\s*/g, ' ');
+    const style = { fontFamily: t.fontFamily, fontSize: t.fontSize, fontWeight: t.fontWeight, fontStyle: t.fontStyle, fill: t.fill };
+    const width = Math.max(1, new FabricText(text, style).width);
+
+    const theta = Math.min(Math.abs(curve) / 100, 0.98) * 2 * Math.PI;
+    const r = width / theta;
+    const up = curve > 0;
+    // Y points down: the arch's top (or the smile's bottom) sits at (0, 0).
+    const cy = up ? r : -r;
+    const from = up ? -Math.PI / 2 - theta / 2 : Math.PI / 2 + theta / 2;
+    const to = up ? -Math.PI / 2 + theta / 2 : Math.PI / 2 - theta / 2;
+    const at = (a: number) => `${(r * Math.cos(a)).toFixed(4)} ${(cy + r * Math.sin(a)).toFixed(4)}`;
+    // Short straight segments rather than an SVG arc: Fabric measures the path to place the
+    // letters, and its arc conversion came out shorter than the text (letters piled up at the ends).
+    const steps = Math.max(16, Math.ceil((theta / (2 * Math.PI)) * 128));
+    const points = Array.from({ length: steps + 1 }, (_, i) => at(from + ((to - from) * i) / steps));
+    const arc = new Path(`M ${points.join(' L ')}`, { fill: '', stroke: '' });
+
+    // Letters stand on the arch; under a smile their tops would bunch up inside the curve, so
+    // there the tops follow the arc and the feet spread out on the wider circle below.
+    return new FabricText(text, { ...commonOptions(obj), ...style, path: arc, pathAlign: up ? 'baseline' : 'ascender' });
+}
+
+/** Pixel width the pattern tile is rasterised at before it is repeated. */
+const TILE_PX = 256;
+
+/**
+ * A pattern: its outline (panel or whole sheet) filled with the repeated tile. It stays put:
+ * it can be selected (to change or delete it) but not moved, rotated or scaled.
+ */
+async function createPattern(obj: CanvasObject): Promise<FabricObject | null> {
+    const p = obj.props;
+    const points = Array.isArray(p.points) ? (p.points as Pt[]) : [];
+    const src = patternTileSrc(obj);
+    if (points.length < 3 || !src) return null;
+
+    let img: HTMLImageElement;
+    try {
+        img = await util.loadImage(src, { crossOrigin: 'anonymous' });
+    } catch {
+        return null;
+    }
+    const iw = img.naturalWidth || img.width || TILE_PX;
+    const ih = img.naturalHeight || img.height || TILE_PX;
+    const tile = document.createElement('canvas');
+    tile.width = TILE_PX;
+    tile.height = Math.max(1, Math.round((TILE_PX * ih) / iw));
+    tile.getContext('2d')?.drawImage(img, 0, 0, tile.width, tile.height);
+
+    const scale = Math.max(1, num(p.tileMm, DEFAULT_TILE_MM)) / TILE_PX;
+    const polygon = new Polygon(points, {
+        ...commonOptions(obj),
+        lockMovementX: true,
+        lockMovementY: true,
+        lockRotation: true,
+        lockScalingX: true,
+        lockScalingY: true,
+        hasControls: false,
+        // Not clickable: a whole-box pattern would otherwise catch every click meant for a panel.
+        // Patterns are changed and removed from the Elements panel instead.
+        selectable: false,
+        evented: false,
+        strokeWidth: 0,
+    });
+    polygon.set('fill', new Pattern({ source: tile, repeat: 'repeat', patternTransform: [scale, 0, 0, scale, 0, 0] }));
+    return polygon;
+}
+
 export function groupChildren(obj: CanvasObject): CanvasObject[] {
     return Array.isArray(obj.props.children) ? (obj.props.children as CanvasObject[]) : [];
 }
 
 /** Cheap change detection between the store and what a Fabric object last showed. */
 export function propsKey(obj: CanvasObject): string {
-    return JSON.stringify([obj.props, !!obj.locked]);
+    return JSON.stringify([obj.props, !!obj.locked, obj.effect ?? 'none']);
 }
 
 /** Pushes store changes onto an existing Fabric object. Returns false when it must be rebuilt. */
@@ -156,6 +275,12 @@ export function applyToFabric(fo: BoundObject, obj: CanvasObject): boolean {
     )
         return false;
     if (obj.type === 'shape' && fo.shapeKind !== str(obj.props.shape, 'rect')) return false;
+    // A recoloured icon is a new image; a pattern's tile, size or outline needs a new fill.
+    if (obj.type === 'icon' && (fo as FabricImage).getSrc?.() !== iconSrc(obj)) return false;
+    if (obj.type === 'pattern') return false;
+    // Curved text is laid out on a path built from its own width: rebuild it on any change,
+    // and when the curve is switched on or off (Textbox <-> text on a path).
+    if (obj.type === 'text' && (textCurve(obj) !== 0 || !(fo instanceof Textbox))) return false;
     if (obj.type === 'group' && fo.childrenKey !== JSON.stringify(groupChildren(obj))) return false;
 
     fo.set(commonOptions(obj));
@@ -212,8 +337,9 @@ export function objectSize(obj: CanvasObject): { width: number; height: number }
 
 function baseSize(obj: CanvasObject): { width: number; height: number } {
     const p = obj.props;
-    if (obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode')
+    if (obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode' || obj.type === 'icon')
         return { width: num(p.naturalWidth, 100), height: num(p.naturalHeight, 100) };
+    if (obj.type === 'pattern') return { width: num(p.width, 40), height: num(p.height, 40) };
     if (obj.type === 'group') return { width: num(p.width, 40), height: num(p.height, 40) };
     if (obj.type === 'text') return { width: num(p.width, 80), height: num(p.height, num(p.fontSize, 4) * 1.2) };
     if (str(p.shape, '') === 'line') return { width: num(p.width, 40), height: num(p.strokeWidth, 1) };

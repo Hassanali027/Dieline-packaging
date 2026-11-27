@@ -20,7 +20,8 @@ import {
     TriangleAlert,
     Ungroup,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useState, type ReactNode, type RefObject } from 'react';
+import ColorPicker from './ColorPicker';
 import type { CanvasController } from './DielineCanvas';
 import { imageDpi, LOW_PRINT_DPI, MIN_PRINT_DPI, MM_PER_PT, objectSize, scaleForSize } from './objects';
 
@@ -98,34 +99,9 @@ function NumberField({
     );
 }
 
-/** Colour swatch that commits when the picker closes, not on every drag of the hue slider. */
+/** Colour control: live while picking, one undo step per pick (see ColorPicker). */
 function ColorField({ label, value, onCommit }: { label: string; value: string; onCommit: (v: string) => void }) {
-    const ref = useRef<HTMLInputElement>(null);
-    const [local, setLocal] = useState(value);
-    const commitRef = useRef(onCommit);
-    commitRef.current = onCommit;
-    useEffect(() => setLocal(value), [value]);
-    useEffect(() => {
-        const el = ref.current;
-        if (!el) return;
-        const onChange = () => commitRef.current(el.value);
-        el.addEventListener('change', onChange);
-        return () => el.removeEventListener('change', onChange);
-    }, []);
-    const hex = /^#[0-9a-f]{6}$/i.test(local) ? local : '#000000';
-    return (
-        <label className="flex items-center gap-1 text-[11px] text-slate-500" title={label}>
-            {label}
-            <input
-                ref={ref}
-                type="color"
-                aria-label={label}
-                value={hex}
-                onChange={(e) => setLocal(e.target.value)}
-                className="h-7 w-8 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
-            />
-        </label>
-    );
+    return <ColorPicker label={label} value={value} onChange={onCommit} />;
 }
 
 const Divider = () => <div className="mx-1 h-6 w-px bg-slate-200" />;
@@ -157,6 +133,7 @@ export default function SelectionToolbar({ controller }: { controller: RefObject
     const isText = single?.type === 'text';
     const isLine = single?.type === 'shape' && p.shape === 'line';
     const isShape = single?.type === 'shape' && !isLine;
+    const isIcon = single?.type === 'icon';
     const size = single ? objectSize(single) : null;
     const opacity = Number(selected[0].props.opacity ?? 1);
     const dpi = single?.type === 'image' ? imageDpi(single) : null;
@@ -234,6 +211,37 @@ export default function SelectionToolbar({ controller }: { controller: RefObject
                         </IconButton>
                     ))}
                     <ColorField label="Colour" value={String(p.fill ?? '#000000')} onCommit={(v) => setOne(single, { fill: v })} />
+                    <label className="flex items-center gap-1 text-[11px] text-slate-500" title="Bend the text along an arc (0 = straight)">
+                        Curve
+                        <input
+                            type="range"
+                            aria-label="Curve"
+                            min={-100}
+                            max={100}
+                            step={1}
+                            value={Number(p.curve ?? 0)}
+                            onChange={(e) => setOne(single, { curve: Number(e.target.value) })}
+                            className="h-1.5 w-20 accent-violet-600"
+                        />
+                        <span className="w-7 text-right tabular-nums">{Number(p.curve ?? 0)}</span>
+                    </label>
+                    {Number(p.curve ?? 0) !== 0 && (
+                        // Curved text cannot be edited on the canvas, so its words are edited here.
+                        <input
+                            type="text"
+                            aria-label="Curved text"
+                            value={String(p.text ?? '')}
+                            onChange={(e) => setOne(single, { text: e.target.value })}
+                            className="h-7 w-32 rounded border border-slate-200 bg-white px-1.5 text-xs"
+                        />
+                    )}
+                    <Divider />
+                </>
+            )}
+
+            {isIcon && single && (
+                <>
+                    <ColorField label="Colour" value={String(p.fill ?? '#0f172a')} onCommit={(v) => setOne(single, { fill: v })} />
                     <Divider />
                 </>
             )}
@@ -340,6 +348,20 @@ export default function SelectionToolbar({ controller }: { controller: RefObject
                     onCommit={(v) => setOne(single, { angle: ((v % 360) + 360) % 360 })}
                     width="w-11"
                 />
+            )}
+
+            {single && single.type !== 'pattern' && (
+                <select
+                    aria-label="Emboss or deboss"
+                    title="Raised (emboss) or pressed in (deboss) — shown in 3D"
+                    value={single.effect ?? 'none'}
+                    onChange={(e) => updateObjects(side, [{ id: single.id, effect: e.target.value as CanvasObject['effect'] }])}
+                    className="h-7 rounded border border-slate-200 bg-white px-1 text-xs"
+                >
+                    <option value="none">No effect</option>
+                    <option value="emboss">Emboss</option>
+                    <option value="deboss">Deboss</option>
+                </select>
             )}
 
             <label className="flex items-center gap-1 text-[11px] text-slate-500" title="Opacity">

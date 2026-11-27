@@ -22,6 +22,22 @@ beforeEach(() => {
 });
 
 describe('editor store objects', () => {
+    it('adds patterns behind the artwork, each new one above the earlier patterns', () => {
+        store().addObject('outside', obj('p1', { type: 'pattern' }), 'back');
+        store().addObject('outside', obj('p2', { type: 'pattern' }), 'back');
+        expect(ids()).toEqual(['p1', 'p2', 'a', 'b', 'c', 'd']);
+        store().addObject('outside', obj('e'));
+        expect(ids()).toEqual(['p1', 'p2', 'a', 'b', 'c', 'd', 'e']);
+    });
+
+    it('sets emboss / deboss through an object patch, as one undo step', () => {
+        store().updateObjects('outside', [{ id: 'b', effect: 'emboss' }]);
+        expect(store().design.outside.find((o) => o.id === 'b')?.effect).toBe('emboss');
+        expect(store().design.outside.find((o) => o.id === 'b')?.props.left).toBe(10);
+        useEditorStore.temporal.getState().undo();
+        expect(store().design.outside.find((o) => o.id === 'b')?.effect).toBeUndefined();
+    });
+
     it('reorders the z-order', () => {
         store().moveObjects('outside', ['b'], 'forward');
         expect(ids()).toEqual(['a', 'c', 'b', 'd']);

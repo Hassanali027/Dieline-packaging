@@ -1,6 +1,6 @@
 import { fromMm, generateDieline, isStyleSupported, round, toMm } from '@/lib/dieline';
 import { parseUploadedDielineFile } from '@/lib/dieline/upload';
-import { MATERIAL_COLORS, MATERIAL_OPTIONS } from '@/lib/three/materials';
+import { MATERIAL_COLORS, materialOptions, useMaterialsVersion } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
@@ -126,6 +126,8 @@ export default function BoxSettings({ products, params, errors, onPickProduct }:
     const lineTaggingMode = useEditorStore((s) => s.lineTaggingMode);
     const setLineTaggingMode = useEditorStore((s) => s.setLineTaggingMode);
     const material = useEditorStore((s) => s.design.material);
+    // Admin materials (Filament → Library) replace the built-in list once they have loaded.
+    useMaterialsVersion();
     const setMaterial = useEditorStore((s) => s.setMaterial);
     const dielineInputRef = useRef<HTMLInputElement>(null);
     const [dielineError, setDielineError] = useState<string | null>(null);
@@ -334,7 +336,7 @@ export default function BoxSettings({ products, params, errors, onPickProduct }:
             <section>
                 <SectionTitle>Board material</SectionTitle>
                 <div className="grid grid-cols-4 gap-2">
-                    {MATERIAL_OPTIONS.map((m) => {
+                    {materialOptions(params?.construction).map((m) => {
                         const active = material === m.value;
                         return (
                             <button

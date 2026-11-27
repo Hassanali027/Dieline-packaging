@@ -11,7 +11,7 @@ export type ZOrderMove = 'forward' | 'backward' | 'front' | 'back';
 export type DesignMeta = { id: number | null; name: string; baseline: Design | null };
 
 /** A partial update for one canvas object: props are merged, other fields replaced. */
-export type ObjectPatch = { id: string; props?: Record<string, unknown>; locked?: boolean };
+export type ObjectPatch = { id: string; props?: Record<string, unknown>; locked?: boolean; effect?: CanvasObject['effect'] };
 
 let idCounter = 0;
 export function newObjectId(): string {
@@ -35,6 +35,13 @@ const NO_OBJECTS: CanvasObject[] = [];
 export function surfaceObjects(design: Design, part: DesignPartKey | null, side: BoxSide): CanvasObject[] {
     if (!part) return design[side];
     return design.parts?.[part]?.[side] ?? NO_OBJECTS;
+}
+
+/** Inserts after the run of patterns at the bottom of the stack, below everything else. */
+function insertBehindArtwork(objects: CanvasObject[], object: CanvasObject): CanvasObject[] {
+    let i = 0;
+    while (i < objects.length && objects[i].type === 'pattern') i++;
+    return [...objects.slice(0, i), object, ...objects.slice(i)];
 }
 
 function objectsOf(state: Pick<EditorState, 'design' | 'activePart'>, side: BoxSide): CanvasObject[] {
@@ -84,8 +91,11 @@ export interface EditorState {
     updateUploadedPanels: (panels: Panel[], foldMapped?: boolean) => void;
     setFaceColor: (panelId: string, color: string) => void;
     setObjects: (side: BoxSide, objects: CanvasObject[]) => void;
-    /** Adds an object on top and selects it. */
-    addObject: (side: BoxSide, object: CanvasObject) => void;
+    /**
+     * Adds an object on top and selects it. 'back' puts it behind the artwork but above the
+     * patterns already at the back (a panel pattern then covers an earlier whole-box one).
+     */
+    addObject: (side: BoxSide, object: CanvasObject, at?: 'top' | 'back') => void;
     /** Adds several objects on top (e.g. a font combination) and selects them all. */
     addObjects: (side: BoxSide, objects: CanvasObject[]) => void;
     /** Applies several patches as one undo step (e.g. moving a multi-selection). */
@@ -231,9 +241,16 @@ export const useEditorStore = create<EditorState>()(
                 set((state) => ({
                     design: withObjects(state.design, state.activePart, side, objects),
                 })),
-            addObject: (side, object) =>
+            addObject: (side, object, at = 'top') =>
                 set((state) => ({
-                    design: withObjects(state.design, state.activePart, side, [...objectsOf(state, side), { ...object, side }]),
+                    design: withObjects(
+                        state.design,
+                        state.activePart,
+                        side,
+                        at === 'back'
+                            ? insertBehindArtwork(objectsOf(state, side), { ...object, side })
+                            : [...objectsOf(state, side), { ...object, side }],
+                    ),
                     selectedObjectIds: [object.id],
                 })),
             addObjects: (side, objects) =>
@@ -252,6 +269,7 @@ export const useEditorStore = create<EditorState>()(
                         return {
                             ...o,
                             ...(p.locked !== undefined ? { locked: p.locked } : {}),
+                            ...(p.effect !== undefined ? { effect: p.effect } : {}),
                             props: p.props ? { ...o.props, ...p.props } : o.props,
                         };
                     });

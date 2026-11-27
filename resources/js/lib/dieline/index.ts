@@ -5,8 +5,10 @@ import { generateMailer } from './styles/mailer';
 import { generateRigidLidBase } from './styles/rigid';
 import { generateBurger, generateSleeve, generateTray } from './styles/trays';
 import { generateReverseTuck, generateStraightTuck } from './styles/tuck';
+import { generateRigidBook, generateRigidDrawer, generateRigidShoulder } from './styles/rigid-extra';
 
 export * from './geometry';
+export * from './uploadedSvg';
 export { BLEED_MM, buildDielineResult, SAFE_MM } from './result';
 export { rigidSizes, WRAP_MM, type RigidSizes } from './styles/rigid';
 
@@ -21,6 +23,9 @@ const GENERATORS: Partial<Record<BoxStyle, Generator>> = {
     tray: generateTray,
     sleeve: generateSleeve,
     'rigid-lid-base': generateRigidLidBase,
+    'rigid-drawer': generateRigidDrawer,
+    'rigid-shoulder': generateRigidShoulder,
+    'rigid-book': generateRigidBook,
 };
 
 export const SUPPORTED_STYLES = Object.keys(GENERATORS) as BoxStyle[];

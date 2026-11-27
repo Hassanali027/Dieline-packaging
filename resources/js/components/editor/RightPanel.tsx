@@ -66,6 +66,22 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
     const setFaceColor = useEditorStore((s) => s.setFaceColor);
     const selectedPanelId = useEditorStore((s) => s.selectedPanelId);
     const setSelectedPanelId = useEditorStore((s) => s.setSelectedPanelId);
+    const activePart = useEditorStore((s) => s.activePart);
+    const source = useEditorStore((s) => s.design.source);
+
+    const downloadCustomizedSvg = () => {
+        const surfaceKey = activePart ?? 'main';
+        const canvas = textures?.surfaces[surfaceKey]?.[activeSide];
+        let artworkDataUrl: string | undefined;
+        try {
+            artworkDataUrl = canvas?.toDataURL('image/png');
+        } catch {
+            artworkDataUrl = undefined;
+        }
+        const rawName = source.kind === 'uploaded-dieline' ? source.fileId.replace(/\.svg$/i, '') : dielineFileName(params, '').replace(/\.$/, '');
+        const name = `${rawName.replace(/[^a-zA-Z0-9_-]+/g, '-') || 'dieline'}-customized.svg`;
+        downloadText(name, dielineToSvg(sheet!, { params: params ?? undefined, artworkDataUrl, title: `${rawName} customized dieline` }));
+    };
 
     const size = params
         ? {
@@ -74,7 +90,14 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
               depth: toMm(params.depth, params.unit),
               thickness: toMm(params.thickness, params.unit),
           }
-        : null;
+        : result
+          ? {
+                length: result.overallSize.width,
+                width: result.overallSize.height,
+                depth: Math.max(1, Math.min(result.overallSize.width, result.overallSize.height) / 3),
+                thickness: 1.5,
+            }
+          : null;
 
     const rigid = !!result?.parts?.length;
     const selectedPanel = result?.panels.find((p) => p.id === selectedPanelId) ?? null;
@@ -132,7 +155,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
 
             {/* Open / close */}
             <Card
-                title={rigid ? 'Lid' : 'Fold'}
+                title={params?.style === 'rigid-drawer' ? 'Drawer' : rigid ? 'Lid' : 'Fold'}
                 icon={<Box className="size-3.5" />}
                 aside={<span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700 tabular-nums">{percent}%</span>}
             >
@@ -223,7 +246,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
             {sheet && (
                 <button
                     type="button"
-                    onClick={() => downloadText(dielineFileName(params), dielineToSvg(sheet, { params: params ?? undefined }))}
+                    onClick={downloadCustomizedSvg}
                     className="group flex shrink-0 items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-3 text-left transition hover:border-violet-300 hover:shadow-md hover:shadow-violet-100"
                 >
                     <span className="flex size-10 items-center justify-center rounded-xl bg-slate-900 text-white transition group-hover:bg-violet-600">
@@ -231,7 +254,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     </span>
                     <span className="flex-1">
                         <span className="block text-sm font-semibold text-slate-900">Download dieline</span>
-                        <span className="block text-[11px] text-slate-500">Layered SVG · cut, crease, bleed, safe</span>
+                        <span className="block text-[11px] text-slate-500">Customized artwork + cut, crease, bleed and safe layers</span>
                     </span>
                     <Download className="size-4 text-slate-400 transition group-hover:text-violet-600" />
                 </button>

@@ -37,6 +37,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     const activeSide = useEditorStore((s) => s.activeSide);
     const setActiveSide = useEditorStore((s) => s.setActiveSide);
     const material = useEditorStore((s) => s.design.material);
+    const source = useEditorStore((s) => s.design.source);
     const faceColors = useEditorStore((s) => s.design.faceColors);
     const selectedPanelId = useEditorStore((s) => s.selectedPanelId);
     const setSelectedPanelId = useEditorStore((s) => s.setSelectedPanelId);
@@ -90,6 +91,10 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     // The box being designed right now. The URL's product is only the starting point: picking
     // another style, opening a saved design or restoring a draft can change it.
     const currentProduct = products.find((p) => p.style === params?.style) ?? activeProduct;
+    const editorTitle = source.kind === 'uploaded-dieline' ? source.fileId : currentProduct?.name ?? 'Box';
+    const defaultDesignName = source.kind === 'uploaded-dieline'
+        ? `${source.fileId.replace(/\.svg$/i, '')} design`
+        : `${currentProduct?.name ?? 'Box'} design`;
 
     const pickProduct = (product: ProductItem) => {
         setSelectedPanelId(null);
@@ -157,11 +162,11 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
 
     return (
         <>
-            <Head title={currentProduct ? `${currentProduct.name} — Dieline Editor` : 'Dieline Editor'} />
+            <Head title={`${editorTitle} — Dieline Editor`} />
             <div className="flex h-screen w-screen flex-col overflow-hidden bg-slate-100 text-slate-900">
                 <EditorHeader
-                    productName={currentProduct?.name ?? 'Box'}
-                    defaultName={`${currentProduct?.name ?? 'Box'} design`}
+                    productName={editorTitle}
+                    defaultName={defaultDesignName}
                     autosave={!draftOffer}
                     readOnly={readOnly}
                     onEditCopy={editCopy}

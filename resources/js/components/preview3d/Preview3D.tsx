@@ -6,8 +6,9 @@ import type { BoxStyle, DielineResult } from '@/types/design';
 import { ContactShadows, OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
-import { CanvasTexture, RepeatWrapping, SRGBColorSpace, type Vector3 } from 'three';
+import { Box3, CanvasTexture, Matrix4, RepeatWrapping, SRGBColorSpace, Vector3 } from 'three';
 import FoldedBox from './FoldedBox';
+import { foldedBounds } from '@/lib/three/foldTree';
 
 type Props = {
     result: DielineResult | null;
@@ -32,23 +33,24 @@ const PRESET_DIRECTIONS: Record<CameraPreset, [number, number, number]> = {
     bottom: [0, -1, 0.0001],
 };
 
-function CameraRig({ preset, size }: { preset: CameraPreset; size: NonNullable<Props['size']> }) {
+function CameraRig({ preset, bounds }: { preset: CameraPreset; bounds: Box3 }) {
     const camera = useThree((s) => s.camera);
     const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null;
-    const { length, width, depth } = size;
-
     useEffect(() => {
         const [dx, dy, dz] = PRESET_DIRECTIONS[preset];
         const len = Math.hypot(dx, dy, dz);
-        const distance = Math.max(length, width, depth) * 2.4;
-        const target: [number, number, number] = [0, depth / 2, 0];
+        const center = bounds.getCenter(new Vector3());
+        const diagonal = Math.max(1, bounds.getSize(new Vector3()).length());
+        const fov = (camera as typeof camera & { fov?: number }).fov ?? 35;
+        const distance = (diagonal * 0.5) / Math.sin((fov * Math.PI) / 360) * 1.12;
+        const target: [number, number, number] = [center.x, center.y, center.z];
         camera.position.set(target[0] + (dx / len) * distance, target[1] + (dy / len) * distance, target[2] + (dz / len) * distance);
         camera.lookAt(...target);
         if (controls) {
             controls.target.set(...target);
             controls.update();
         }
-    }, [preset, length, width, depth, camera, controls]);
+    }, [preset, bounds, camera, controls]);
 
     return null;
 }
@@ -94,6 +96,18 @@ export default function Preview3D({
     const containerRef = useRef<HTMLDivElement>(null);
     const pieces = useMemo(() => (result && size ? buildAssembly(style, result, progress, size.thickness) : []), [result, style, progress, size]);
     const extent = size ? Math.max(size.length, size.width, size.depth) : 200;
+    const cameraBounds = useMemo(() => {
+        const box = new Box3();
+        if (!result || !size) return box.setFromCenterAndSize(new Vector3(), new Vector3(extent, extent, extent));
+        for (const endpoint of [0, 1]) {
+            for (const piece of buildAssembly(style, result, endpoint, size.thickness)) {
+                const pieceBounds = foldedBounds(piece.result.panels, piece.fold, piece.orientation);
+                pieceBounds.applyMatrix4(new Matrix4().makeTranslation(...piece.position));
+                box.union(pieceBounds);
+            }
+        }
+        return box;
+    }, [result, style, size?.length, size?.width, size?.depth, size?.thickness, extent]);
 
     return (
         <div ref={containerRef} className="relative h-full w-full">
@@ -139,7 +153,7 @@ export default function Preview3D({
 
                 <ContactShadows position={[0, -0.5, 0]} scale={extent * 6} far={extent} blur={2.5} opacity={0.65} resolution={512} />
                 <OrbitControls makeDefault enableDamping minDistance={extent * 0.6} maxDistance={extent * 8} />
-                {size && <CameraRig preset={cameraPreset} size={size} />}
+                {size && <CameraRig preset={cameraPreset} bounds={cameraBounds} />}
             </Canvas>
         </div>
     );

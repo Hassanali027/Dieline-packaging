@@ -24,6 +24,8 @@ export type SvgExportOptions = {
     /** Shown as the box size label and in <title>. */
     params?: BoxParams;
     title?: string;
+    /** PNG data URL of the customized print surface, embedded below the dieline layers. */
+    artworkDataUrl?: string;
 };
 
 export const LAYER_STYLE: Record<Exclude<SvgLayer, 'dimensions'>, { id: string; stroke: string; width: number; dash?: string }> = {
@@ -90,6 +92,9 @@ export function dielineToSvg(result: DielineResult, options: SvgExportOptions = 
     const vbH = H + 2 * m;
 
     const layers: string[] = [];
+    if (options.artworkDataUrl?.startsWith('data:image/png;base64,')) {
+        layers.push(layer('Artwork', `    <image x="0" y="0" width="${n(W)}" height="${n(H)}" href="${options.artworkDataUrl}" preserveAspectRatio="none"/>`));
+    }
     if (show.bleed) layers.push(pathLayer('bleed', [result.bleedPath]));
     if (show.safe) layers.push(pathLayer('safe', [result.safePath]));
     if (show.crease) layers.push(pathLayer('crease', result.creasePaths));

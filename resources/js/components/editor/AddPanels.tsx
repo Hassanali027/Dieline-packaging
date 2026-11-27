@@ -1,8 +1,10 @@
 import { ApiError, listUploads, MAX_UPLOAD_BYTES, UPLOAD_ACCEPT, uploadImage, type UploadedAsset } from '@/lib/api';
 import { ensureFont, FONT_COMBOS, QUICK_TEXTS } from '@/lib/fonts';
 import { cn } from '@/lib/utils';
+import { parseUploadedSvg } from '@/lib/dieline';
 import { useEditorStore } from '@/store/useEditorStore';
-import { Circle, Loader2, Minus, Square, Triangle, Upload } from 'lucide-react';
+import type { BoxSource } from '@/types/design';
+import { Circle, FileText, Loader2, Minus, Square, Triangle, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { makeImage, makeShape, makeText, makeTextWith, type ShapeKind, type SheetFrame, type TextPreset } from './objects';
 
@@ -152,9 +154,16 @@ function loadNaturalSize(url: string): Promise<{ width: number; height: number }
 export function UploadsPanel({ sheet }: PanelProps) {
     const { side, addObject } = useAdd();
     const inputRef = useRef<HTMLInputElement>(null);
+    const dielineRef = useRef<HTMLInputElement>(null);
+    const setSource = useEditorStore((s) => s.setSource);
+    const setActiveTab = useEditorStore((s) => s.setActiveTab);
+    const importedDieline = useEditorStore((s) => s.design.source.kind === 'uploaded-dieline' ? s.design.source : null);
     const [assets, setAssets] = useState<UploadedAsset[]>([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [dielineBusy, setDielineBusy] = useState(false);
+    const svgAssets = assets.filter((asset) => asset.mime === 'image/svg+xml' || /\.svg$/i.test(asset.name ?? ''));
+    const imageAssets = assets.filter((asset) => !svgAssets.includes(asset));
 
     useEffect(() => {
         listUploads()
@@ -195,8 +204,94 @@ export function UploadsPanel({ sheet }: PanelProps) {
         }
     };
 
+    const onDieline = async (file: File | undefined) => {
+        if (!file) return;
+        setError(null);
+        setDielineBusy(true);
+        try {
+            if (file.size > MAX_UPLOAD_BYTES) throw new Error('SVG dielines must be 10 MB or smaller.');
+            if (!/\.svg$/i.test(file.name) && file.type !== 'image/svg+xml') throw new Error('Upload an SVG dieline.');
+            const source = await readUploadedDieline(file.name, await file.text());
+            const { data } = await uploadImage(file);
+            setAssets((list) => [data, ...list.filter((asset) => asset.id !== data.id)]);
+            setSource(source);
+            setActiveTab('uploads');
+        } catch (e) {
+            const err = e as ApiError;
+            setError(err.errors?.file?.[0] ?? err.message);
+        } finally {
+            setDielineBusy(false);
+            if (dielineRef.current) dielineRef.current.value = '';
+        }
+    };
+
+    const readUploadedDieline = (fileId: string, content: string): Extract<BoxSource, { kind: 'uploaded-dieline' }> => {
+        const parsed = parseUploadedSvg(content);
+        if (!parsed.panels.length) throw new Error('No closed panels were found. Add polygon panels to the SVG and try again.');
+        const otherWarnings = parsed.warnings.filter((warning) => !warning.includes('confirm the physical scale'));
+        if (otherWarnings.length) setError(otherWarnings.join(' '));
+        return {
+            kind: 'uploaded-dieline',
+            fileId,
+            panels: parsed.panels,
+            lines: parsed.lines,
+            foldMapped: parsed.panels.some((panel) => !!panel.parentId),
+            widthMm: parsed.width,
+            heightMm: parsed.height,
+            unit: parsed.unit,
+            // Pixel SVGs use the parser's standard 96 px/in conversion automatically.
+            scaleConfirmed: true,
+        };
+    };
+
+    const openDielineAsset = async (asset: UploadedAsset) => {
+        setError(null);
+        try {
+            const response = await fetch(asset.url);
+            if (!response.ok) throw new Error(`Could not open ${asset.name ?? 'this SVG'}.`);
+            setSource(readUploadedDieline(asset.name ?? `dieline-${asset.id}.svg`, await response.text()));
+            setActiveTab('uploads');
+        } catch (e) {
+            setError((e as Error).message);
+        }
+    };
+
     return (
         <div className="flex flex-col gap-3">
+            <input ref={dielineRef} type="file" accept="image/svg+xml,.svg" className="hidden" onChange={(e) => void onDieline(e.target.files?.[0])} />
+            <button type="button" onClick={() => dielineRef.current?.click()} disabled={dielineBusy} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-violet-300 disabled:opacity-60">
+                <span className="block text-sm font-semibold text-slate-800">{dielineBusy ? 'Importing dieline…' : 'Import SVG dieline'}</span>
+                <span className="mt-1 block text-xs text-slate-500">Straight-edged panels · SVG · up to 10 MB</span>
+            </button>
+            {importedDieline && (
+                <div className="flex flex-col gap-2">
+                </div>
+            )}
+            {svgAssets.length > 0 && (
+                <section>
+                    <h3 className="mb-2 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">Your dielines</h3>
+                    <div className="flex flex-col gap-1.5">
+                        {svgAssets.map((asset) => {
+                            const active = importedDieline?.fileId === asset.name;
+                            return (
+                                <button
+                                    key={asset.id}
+                                    type="button"
+                                    onClick={() => void openDielineAsset(asset)}
+                                    className={cn('flex min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition', active ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white hover:border-violet-300')}
+                                >
+                                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-violet-600"><FileText className="size-4" /></span>
+                                    <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-xs font-semibold text-slate-800">{asset.name ?? 'Untitled dieline.svg'}</span>
+                                        <span className="block text-[10px] text-slate-500">{asset.size ? `${(asset.size / 1024).toFixed(0)} KB` : 'SVG dieline'}</span>
+                                    </span>
+                                    {active && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-semibold text-violet-700">Open</span>}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </section>
+            )}
             <input ref={inputRef} type="file" accept={UPLOAD_ACCEPT} multiple className="hidden" onChange={(e) => onFiles(e.target.files)} />
             <button
                 type="button"
@@ -214,11 +309,11 @@ export function UploadsPanel({ sheet }: PanelProps) {
                 <span className="text-xs text-slate-400">JPG, PNG or SVG · up to 10 MB · or drop here</span>
             </button>
             {error && <p className="rounded-md bg-rose-50 p-2 text-xs text-rose-700">{error}</p>}
-            {assets.length > 0 && (
+            {imageAssets.length > 0 && (
                 <div>
-                    <h3 className="mb-2 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">Your uploads</h3>
+                    <h3 className="mb-2 text-[11px] font-bold tracking-[0.08em] text-slate-400 uppercase">Your image uploads</h3>
                     <div className="grid grid-cols-3 gap-2">
-                        {assets.map((a) => (
+                        {imageAssets.map((a) => (
                             <button
                                 key={a.id}
                                 type="button"

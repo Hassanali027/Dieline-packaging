@@ -1,4 +1,4 @@
-import { generateDieline, InvalidParamsError, isStyleSupported, UnsupportedStyleError } from '@/lib/dieline';
+import { buildDielineResult, generateDieline, InvalidParamsError, isStyleSupported, UnsupportedStyleError } from '@/lib/dieline';
 import { useEditorStore } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
 import { useMemo } from 'react';
@@ -18,6 +18,15 @@ export function useDieline(): DielineState {
 
     return useMemo(() => {
         if (!params) {
+            if (source.kind === 'uploaded-dieline' && source.panels.length) {
+                const result = buildDielineResult(source.panels);
+                const cutLines = (source.lines ?? []).filter((line) => line.kind === 'cut');
+                if (cutLines.length) {
+                    const importedCuts = cutLines.map((line) => `M ${line.a.x} ${line.a.y} L ${line.b.x} ${line.b.y}`);
+                    result.cutPath = [result.cutPath, ...importedCuts].filter(Boolean).join(' ');
+                }
+                return { params: null, result, errors: [], supported: true };
+            }
             return { params: null, result: null, errors: [], supported: false };
         }
         if (!isStyleSupported(params.style)) {
@@ -34,5 +43,5 @@ export function useDieline(): DielineState {
             }
             throw error;
         }
-    }, [params]);
+    }, [params, source]);
 }

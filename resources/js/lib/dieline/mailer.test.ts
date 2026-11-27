@@ -168,7 +168,7 @@ describe('validation', () => {
 
     it('reports unsupported styles', () => {
         expect(isStyleSupported('mailer')).toBe(true);
-        expect(isStyleSupported('rigid-book')).toBe(false);
-        expect(() => generateDieline({ ...defaults, style: 'rigid-book' })).toThrow(UnsupportedStyleError);
+        expect(isStyleSupported('rigid-book')).toBe(true);
+        expect(() => generateDieline({ ...defaults, style: 'rigid-book', construction: 'rigid' })).not.toThrow();
     });
 });

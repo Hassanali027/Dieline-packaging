@@ -62,7 +62,7 @@ export function rigidSizes(params: BoxParams): RigidSizes {
 }
 
 /** Wrap for one chipboard tray of outer size length × width × height. */
-function wrapPanels(part: 'lid' | 'base', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
+export function wrapPanels(part: 'lid' | 'base' | 'drawer', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
     const Lo = length;
     const Wo = width;
     const H = height;
@@ -72,7 +72,7 @@ function wrapPanels(part: 'lid' | 'base', length: number, width: number, height:
     const earTaper = ear * 0.4;
     const id = (name: string) => `${part}-${name}`;
     const face = part === 'lid' ? 'top' : 'bottom';
-    const label = (name: string) => `${part === 'lid' ? 'Lid' : 'Base'} ${name}`;
+    const label = (name: string) => `${part === 'lid' ? 'Lid' : part === 'drawer' ? 'Drawer' : 'Base'} ${name}`;
 
     const walls: [string, string, Panel['polygon'], { a: ReturnType<typeof pt>; b: ReturnType<typeof pt> }][] = [
         ['back', 'Back', rect(0, -H, Lo, H), hinge(pt(0, 0), pt(Lo, 0))],
@@ -139,8 +139,8 @@ function wrapPanels(part: 'lid' | 'base', length: number, width: number, height:
 }
 
 /** Liner: inside floor plus the inside walls below the turn-in. */
-function linerPanels(length: number, width: number, wall: number): Panel[] {
-    const floor: Panel = { id: 'liner-floor', name: 'Liner Floor', polygon: rect(0, 0, length, width), foldAngle: 0, side: 'outside', part: 'liner' };
+export function linerPanels(length: number, width: number, wall: number, part: 'liner' | 'tray' = 'liner'): Panel[] {
+    const floor: Panel = { id: `${part}-floor`, name: part === 'tray' ? 'Tray Floor' : 'Liner Floor', polygon: rect(0, 0, length, width), foldAngle: 0, side: 'outside', part };
     if (wall < 3) return [floor];
     const w = wall;
     const sides: [string, Panel['polygon'], ReturnType<typeof pt>, ReturnType<typeof pt>][] = [
@@ -153,14 +153,14 @@ function linerPanels(length: number, width: number, wall: number): Panel[] {
         floor,
         ...sides.map(
             ([key, polygon, a, b]): Panel => ({
-                id: `liner-${key}`,
-                name: `Liner ${key[0].toUpperCase()}${key.slice(1)}`,
+                id: `${part}-${key}`,
+                name: `${part === 'tray' ? 'Tray' : 'Liner'} ${key[0].toUpperCase()}${key.slice(1)}`,
                 polygon,
                 hinge: hinge(a, b),
-                parentId: 'liner-floor',
+                parentId: `${part}-floor`,
                 foldAngle: 90,
                 side: 'outside',
-                part: 'liner',
+                part,
             }),
         ),
     ];

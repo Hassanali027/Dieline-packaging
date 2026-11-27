@@ -1,4 +1,4 @@
-import { fromMm, generateDieline, isStyleSupported, round, toMm } from '@/lib/dieline';
+import { extractPart, fromMm, generateDieline, isStyleSupported, round, toMm } from '@/lib/dieline';
 import { MATERIAL_COLORS, MATERIAL_OPTIONS } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
@@ -86,34 +86,28 @@ function DimensionInput({
 
 /** The style's real dieline (from the engine) as a tiny line drawing. */
 function MiniDieline({ result, active }: { result: DielineResult; active: boolean }) {
-    const { width: W, height: H } = result.overallSize;
+    const miniParts = result.parts?.length ? result.parts.map((part) => extractPart(result, part)) : [result];
+    const isDrawerBox = result.parts?.includes('drawer') && result.parts.includes('sleeve');
+    const gap = result.parts?.length ? (isDrawerBox ? Math.max(55, result.overallSize.width * 0.3) : Math.max(18, result.overallSize.width * 0.08)) : 0;
+    const W = miniParts.reduce((sum, part) => sum + part.overallSize.width, 0) + gap * (miniParts.length - 1);
+    const H = Math.max(...miniParts.map((part) => part.overallSize.height));
+    // The preview uses non-scaling SVG strokes, so a small millimetre-based viewBox
+    // inset can be less than one screen pixel and clip the outer cut edge. Keep a
+    // visible gutter around the entire net, especially the final part on the right.
+    const padding = Math.max(24, Math.max(W, H) * 0.03);
+    let x = 0;
     return (
-        <svg viewBox={`-6 -6 ${W + 12} ${H + 12}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
-            {result.panels.map((p) => (
-                <polygon
-                    key={p.id}
-                    points={p.polygon.map((q) => `${q.x},${q.y}`).join(' ')}
-                    className={active ? 'fill-violet-500/10' : 'fill-white'}
-                />
-            ))}
-            {result.creasePaths.map((d, i) => (
-                <path
-                    key={i}
-                    d={d}
-                    fill="none"
-                    vectorEffect="non-scaling-stroke"
-                    strokeWidth={0.8}
-                    strokeDasharray="2 2"
-                    className={active ? 'stroke-violet-400' : 'stroke-slate-300'}
-                />
-            ))}
-            <path
-                d={result.cutPath}
-                fill="none"
-                vectorEffect="non-scaling-stroke"
-                strokeWidth={1.2}
-                className={active ? 'stroke-violet-600' : 'stroke-slate-500'}
-            />
+        <svg viewBox={`${-padding} ${-padding} ${W + padding * 2} ${H + padding * 2}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+            {miniParts.map((part, index) => {
+                const offset = x;
+                x += part.overallSize.width + gap;
+                const y = (H - part.overallSize.height) / 2;
+                return <g key={result.parts?.[index] ?? 'main'} transform={`translate(${offset} ${y})`}>
+                    {part.panels.map((panel) => <polygon key={panel.id} points={panel.polygon.map((q) => `${q.x},${q.y}`).join(' ')} className={active ? 'fill-violet-500/10' : 'fill-white'} />)}
+                    {part.creasePaths.map((d, i) => <path key={i} d={d} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={0.8} strokeDasharray="2 2" className={active ? 'stroke-violet-400' : 'stroke-slate-300'} />)}
+                    <path d={part.cutPath} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={1.2} className={active ? 'stroke-violet-600' : 'stroke-slate-500'} />
+                </g>;
+            })}
         </svg>
     );
 }

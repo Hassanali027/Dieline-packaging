@@ -1,4 +1,4 @@
-import type { BoxParams, BoxSource, CanvasObject, Design, DesignPartKey } from '@/types/design';
+import type { BoxParams, BoxSource, CanvasObject, Design, DesignPartKey, Panel } from '@/types/design';
 import { temporal } from 'zundo';
 import { create } from 'zustand';
 
@@ -58,6 +58,8 @@ export interface EditorState {
     activePart: DesignPartKey | null;
     foldProgress: number;
     xRay: boolean;
+    showTurnInWarning: boolean;
+    lineTaggingMode: boolean;
     cameraPreset: CameraPreset;
     selectedObjectIds: string[];
     selectedPanelId: string | null;
@@ -69,12 +71,17 @@ export interface EditorState {
     setActivePart: (part: DesignPartKey | null) => void;
     setFoldProgress: (value: number) => void;
     toggleXRay: () => void;
+    toggleTurnInWarning: () => void;
+    setLineTaggingMode: (on: boolean) => void;
+    setUploadedLineTag: (lineId: string, tag: 'cut' | 'fold') => void;
     setCameraPreset: (preset: CameraPreset) => void;
     setSelectedObjectIds: (ids: string[]) => void;
     setSelectedPanelId: (panelId: string | null) => void;
     updateParams: (params: Partial<BoxParams>) => void;
     setSource: (source: BoxSource) => void;
     setMaterial: (material: Design['material']) => void;
+    setFinish: (finish: Partial<NonNullable<Design['finish']>>) => void;
+    updateUploadedPanels: (panels: Panel[], foldMapped?: boolean) => void;
     setFaceColor: (panelId: string, color: string) => void;
     setObjects: (side: BoxSide, objects: CanvasObject[]) => void;
     /** Adds an object on top and selects it. */
@@ -135,6 +142,8 @@ export const useEditorStore = create<EditorState>()(
             activePart: null,
             foldProgress: 0.9,
             xRay: false,
+            showTurnInWarning: true,
+            lineTaggingMode: false,
             cameraPreset: 'front',
             selectedObjectIds: [],
             selectedPanelId: null,
@@ -152,6 +161,25 @@ export const useEditorStore = create<EditorState>()(
             setActivePart: (activePart) => set({ activePart, selectedObjectIds: [] }),
             setFoldProgress: (foldProgress) => set({ foldProgress: Math.max(0, Math.min(1, foldProgress)) }),
             toggleXRay: () => set((state) => ({ xRay: !state.xRay })),
+            toggleTurnInWarning: () => set((state) => ({ showTurnInWarning: !state.showTurnInWarning })),
+            setLineTaggingMode: (lineTaggingMode) => set({ lineTaggingMode }),
+            setUploadedLineTag: (lineId, tag) =>
+                set((state) => {
+                    if (state.design.source.kind !== 'uploaded-dieline' || !state.design.source.lines) {
+                        return state;
+                    }
+                    const lines = state.design.source.lines.map((l) => (l.id === lineId ? { ...l, tag } : l));
+                    return {
+                        design: {
+                            ...state.design,
+                            source: {
+                                ...state.design.source,
+                                lines,
+                                foldMapped: lines.some((l) => l.tag === 'fold'),
+                            },
+                        },
+                    };
+                }),
             setCameraPreset: (cameraPreset) => set({ cameraPreset }),
             setSelectedObjectIds: (selectedObjectIds) => set({ selectedObjectIds }),
             setSelectedPanelId: (selectedPanelId) => set({ selectedPanelId }),
@@ -178,6 +206,20 @@ export const useEditorStore = create<EditorState>()(
                 set((state) => ({
                     design: { ...state.design, material },
                 })),
+            setFinish: (finish) =>
+                set((state) => ({
+                    design: { ...state.design, finish: { ...state.design.finish, ...finish } },
+                })),
+            updateUploadedPanels: (panels, foldMapped = true) =>
+                set((state) => {
+                    if (state.design.source.kind !== 'uploaded-dieline') return state;
+                    return {
+                        design: {
+                            ...state.design,
+                            source: { ...state.design.source, panels, foldMapped },
+                        },
+                    };
+                }),
             setFaceColor: (panelId, color) =>
                 set((state) => ({
                     design: {

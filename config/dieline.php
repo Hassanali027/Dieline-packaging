@@ -9,4 +9,17 @@ return [
 
     // Quote requests per minute per IP (plan: 5/min).
     'quote_rate_per_minute' => (int) env('QUOTE_RATE_PER_MINUTE', 5),
+
+    // Custom box uploads (Sprint 3).
+    'custom_boxes' => [
+        // poppler's pdftocairo, used to turn PDF / AI dielines into SVG. A full path on Windows,
+        // e.g. C:\poppler\Library\bin\pdftocairo.exe. Missing tool = upload goes to admin review.
+        'pdftocairo' => env('POPPLER_PDFTOCAIRO', 'pdftocairo'),
+        // Node runs scripts/validate-glb.mjs (gltf-validator) for 3D models.
+        'node' => env('NODE_BINARY', 'node'),
+        // Conversions run in a separate process and are stopped after this many seconds.
+        'timeout' => (int) env('CUSTOM_BOX_TIMEOUT', 60),
+        // Upload limit in kilobytes (plan: 20 MB).
+        'max_kb' => 20480,
+    ],
 ];

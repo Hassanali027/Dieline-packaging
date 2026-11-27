@@ -73,10 +73,12 @@ export default function ShareDialog() {
                     Share
                 </button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="rounded-3xl border-slate-200 bg-white text-slate-900 sm:max-w-md">
                 <DialogHeader>
-                    <DialogTitle>Share this design</DialogTitle>
-                    <DialogDescription>Anyone with the link can view a copy of the design (read-only) for 30 days.</DialogDescription>
+                    <DialogTitle className="text-lg font-bold text-slate-900">Share this design</DialogTitle>
+                    <DialogDescription className="text-slate-500">
+                        Anyone with the link can view a copy of the design (read-only) for 30 days.
+                    </DialogDescription>
                 </DialogHeader>
                 {link ? (
                     <div className="flex flex-col gap-3">

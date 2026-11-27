@@ -53,8 +53,8 @@ class DesignResource extends Resource
                     ->trueLabel('Registered users')
                     ->falseLabel('Guests')
                     ->queries(
-                        true: fn (Builder $q) => $q->whereNotNull('user_id'),
-                        false: fn (Builder $q) => $q->whereNull('user_id'),
+                        true: fn (Builder $query) => $query->whereNotNull('user_id'),
+                        false: fn (Builder $query) => $query->whereNull('user_id'),
                     ),
             ])
             ->recordActions([

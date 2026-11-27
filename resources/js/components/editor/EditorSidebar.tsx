@@ -22,7 +22,6 @@ const TABS: { id: EditorTab; label: string; title: string; hint: string; icon: L
         title: 'QR & barcodes',
         hint: 'Scannable codes',
         icon: QrCode,
-        comingIn: 'QR codes and 9 barcode formats arrive in Sprint 3 (Week 6–7).',
     },
 ];
 

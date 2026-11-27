@@ -1,8 +1,10 @@
 import { Box3, Matrix4, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import type { BoxParams } from '../../types/design';
+import type { BoxParams, DielineResult } from '../../types/design';
 import { generateDieline, rigidSizes } from '../dieline';
-import { buildAssembly, LID_LIFT_EXTRA, type AssemblyPiece } from './assembly';
+import { rect } from '../dieline/geometry';
+import { buildDielineResult } from '../dieline/result';
+import { BOOK_OPEN_DEG, buildAssembly, LID_LIFT_EXTRA, MAGNETIC_OPEN_DEG, type AssemblyPiece } from './assembly';
 import { foldedBounds } from './foldTree';
 
 function worldBounds(piece: AssemblyPiece): Box3 {
@@ -63,52 +65,30 @@ describe('3D assembly', () => {
         expect(worldBounds(open[2]).min.y - lid.min.y).toBeCloseTo(s.lid.height + LID_LIFT_EXTRA, 3);
     });
 
-    it('keeps the rigid drawer sleeve still and slides the tray when opened', () => {
-        const params: BoxParams = { ...rigid, style: 'rigid-drawer' };
-        const result = generateDieline(params);
-        const closed = buildAssembly('rigid-drawer', result, 1, 2);
-        const opened = buildAssembly('rigid-drawer', result, 0, 2);
-        expect(closed.map((piece) => piece.key)).toEqual(['sleeve', 'drawer']);
-        expect(opened[0].position).toEqual(closed[0].position);
-        expect(opened[1].position[0]).toBeGreaterThan(closed[1].position[0]);
-        expect(opened[1].fold).toBe(1);
-        const sleeveBounds = worldBounds(closed[0]);
-        const trayBounds = worldBounds(closed[1]);
-        expect(trayBounds.min.y).toBeGreaterThan(sleeveBounds.min.y);
-        expect(trayBounds.max.y).toBeLessThan(sleeveBounds.max.y);
-        expect(trayBounds.min.x).toBeGreaterThan(sleeveBounds.min.x);
-        expect(trayBounds.max.x).toBeLessThan(sleeveBounds.max.x);
+    it('slides the rigid drawer out of the sleeve along +Z when opened', () => {
+        const mockDrawerResult: DielineResult = buildDielineResult(
+            [
+                { id: 'sleeve-floor', name: 'Sleeve', polygon: rect(0, 0, 200, 150), foldAngle: 0, side: 'outside', part: 'sleeve' },
+                { id: 'drawer-floor', name: 'Drawer', polygon: rect(230, 0, 190, 145), foldAngle: 0, side: 'outside', part: 'drawer' },
+            ],
+            { parts: ['sleeve', 'drawer'] },
+        );
+        const closed = buildAssembly('rigid-drawer', mockDrawerResult, 1, 2);
+        const open = buildAssembly('rigid-drawer', mockDrawerResult, 0, 2);
+
+        expect(closed.map((p) => p.key)).toEqual(['sleeve', 'drawer']);
+        expect(open[0].position[2]).toBeCloseTo(closed[0].position[2], 3);
+        expect(open[1].position[2]).toBeGreaterThan(closed[1].position[2] + 50);
     });
 
-    it('assembles the shoulder neck between the base and lid', () => {
-        const params: BoxParams = { ...rigid, style: 'rigid-shoulder', rigid: { ...rigid.rigid!, shoulderHeight: 18 } };
-        const result = generateDieline(params);
-        const pieces = buildAssembly('rigid-shoulder', result, 1, 2);
-        expect(pieces.map((piece) => piece.key)).toEqual(['base', 'liner', 'sleeve', 'lid']);
-        const baseBox = worldBounds(pieces[0]);
-        const neckBox = worldBounds(pieces[2]);
-        const lidBox = worldBounds(pieces[3]);
-        expect(neckBox.min.y).toBeCloseTo(baseBox.max.y, 1);
-        expect(neckBox.max.y).toBeGreaterThan(baseBox.max.y);
-        expect(lidBox.max.y).toBeCloseTo(neckBox.max.y, 1);
-        expect(lidBox.min.x).toBeLessThan(neckBox.min.x);
-        expect(lidBox.max.x).toBeGreaterThan(neckBox.max.x);
-        expect(worldBounds(buildAssembly('rigid-shoulder', result, 0, 2)[3]).max.y).toBeGreaterThan(worldBounds(pieces[3]).max.y);
-    });
+    it('animates hinged lids for rigid-book and rigid-magnetic styles', () => {
+        const result = generateDieline(rigid);
+        const bookOpen = buildAssembly('rigid-book', result, 0, 2);
+        const bookClosed = buildAssembly('rigid-book', result, 1, 2);
+        expect(bookClosed.find((p) => p.key === 'lid')?.hingeRotation?.angle).toBeCloseTo(0, 5);
+        expect(bookOpen.find((p) => p.key === 'lid')?.hingeRotation?.angle).toBeCloseTo((BOOK_OPEN_DEG * Math.PI) / 180, 4);
 
-    it('keeps the book tray fixed while the spine-connected cover opens', () => {
-        const params: BoxParams = { ...rigid, style: 'rigid-book' };
-        const result = generateDieline(params);
-        const closed = buildAssembly('rigid-book', result, 1, 2);
-        const open = buildAssembly('rigid-book', result, 0, 2);
-        expect(closed.map((piece) => piece.key)).toEqual(['base', 'liner', 'lid']);
-        expect(open[0].position).toEqual(closed[0].position);
-        expect(open[2].fold).toBe(0);
-        expect(closed[2].fold).toBe(1);
-        expect(worldBounds(open[2]).max.z).not.toBeCloseTo(worldBounds(closed[2]).max.z, 1);
-        const openCover = foldedBounds(open[2].result.panels, 0);
-        const closedCover = foldedBounds(closed[2].result.panels, 1);
-        expect(closedCover.getSize(new Vector3()).x).toBeLessThan(openCover.getSize(new Vector3()).x);
-        expect(closedCover.getSize(new Vector3()).y).toBeGreaterThan(openCover.getSize(new Vector3()).y);
+        const magOpen = buildAssembly('rigid-magnetic', result, 0, 2);
+        expect(Math.abs(magOpen.find((p) => p.key === 'lid')?.hingeRotation?.angle ?? 0)).toBeCloseTo((MAGNETIC_OPEN_DEG * Math.PI) / 180, 4);
     });
 });

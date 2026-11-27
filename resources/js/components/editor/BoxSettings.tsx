@@ -1,10 +1,11 @@
-import { extractPart, fromMm, generateDieline, isStyleSupported, round, toMm } from '@/lib/dieline';
+import { fromMm, generateDieline, isStyleSupported, round, toMm } from '@/lib/dieline';
+import { parseUploadedDielineFile } from '@/lib/dieline/upload';
 import { MATERIAL_COLORS, MATERIAL_OPTIONS } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
-import { Clock3, Palette } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Clock3, Palette, Scissors, Upload } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ProductItem } from './types';
 
 type Props = {
@@ -86,36 +87,62 @@ function DimensionInput({
 
 /** The style's real dieline (from the engine) as a tiny line drawing. */
 function MiniDieline({ result, active }: { result: DielineResult; active: boolean }) {
-    const miniParts = result.parts?.length ? result.parts.map((part) => extractPart(result, part)) : [result];
-    const isDrawerBox = result.parts?.includes('drawer') && result.parts.includes('sleeve');
-    const gap = result.parts?.length ? (isDrawerBox ? Math.max(55, result.overallSize.width * 0.3) : Math.max(18, result.overallSize.width * 0.08)) : 0;
-    const W = miniParts.reduce((sum, part) => sum + part.overallSize.width, 0) + gap * (miniParts.length - 1);
-    const H = Math.max(...miniParts.map((part) => part.overallSize.height));
-    // The preview uses non-scaling SVG strokes, so a small millimetre-based viewBox
-    // inset can be less than one screen pixel and clip the outer cut edge. Keep a
-    // visible gutter around the entire net, especially the final part on the right.
-    const padding = Math.max(24, Math.max(W, H) * 0.03);
-    let x = 0;
+    const { width: W, height: H } = result.overallSize;
     return (
-        <svg viewBox={`${-padding} ${-padding} ${W + padding * 2} ${H + padding * 2}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
-            {miniParts.map((part, index) => {
-                const offset = x;
-                x += part.overallSize.width + gap;
-                const y = (H - part.overallSize.height) / 2;
-                return <g key={result.parts?.[index] ?? 'main'} transform={`translate(${offset} ${y})`}>
-                    {part.panels.map((panel) => <polygon key={panel.id} points={panel.polygon.map((q) => `${q.x},${q.y}`).join(' ')} className={active ? 'fill-violet-500/10' : 'fill-white'} />)}
-                    {part.creasePaths.map((d, i) => <path key={i} d={d} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={0.8} strokeDasharray="2 2" className={active ? 'stroke-violet-400' : 'stroke-slate-300'} />)}
-                    <path d={part.cutPath} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={1.2} className={active ? 'stroke-violet-600' : 'stroke-slate-500'} />
-                </g>;
-            })}
+        <svg viewBox={`-6 -6 ${W + 12} ${H + 12}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet" aria-hidden>
+            {result.panels.map((p) => (
+                <polygon
+                    key={p.id}
+                    points={p.polygon.map((q) => `${q.x},${q.y}`).join(' ')}
+                    className={active ? 'fill-violet-500/10' : 'fill-white'}
+                />
+            ))}
+            {result.creasePaths.map((d, i) => (
+                <path
+                    key={i}
+                    d={d}
+                    fill="none"
+                    vectorEffect="non-scaling-stroke"
+                    strokeWidth={0.8}
+                    strokeDasharray="2 2"
+                    className={active ? 'stroke-violet-400' : 'stroke-slate-300'}
+                />
+            ))}
+            <path
+                d={result.cutPath}
+                fill="none"
+                vectorEffect="non-scaling-stroke"
+                strokeWidth={1.2}
+                className={active ? 'stroke-violet-600' : 'stroke-slate-500'}
+            />
         </svg>
     );
 }
 
 export default function BoxSettings({ products, params, errors, onPickProduct }: Props) {
     const updateParams = useEditorStore((s) => s.updateParams);
+    const source = useEditorStore((s) => s.design.source);
+    const setSource = useEditorStore((s) => s.setSource);
+    const lineTaggingMode = useEditorStore((s) => s.lineTaggingMode);
+    const setLineTaggingMode = useEditorStore((s) => s.setLineTaggingMode);
     const material = useEditorStore((s) => s.design.material);
     const setMaterial = useEditorStore((s) => s.setMaterial);
+    const dielineInputRef = useRef<HTMLInputElement>(null);
+    const [dielineError, setDielineError] = useState<string | null>(null);
+
+    const onUploadDieline = async (file: File | undefined) => {
+        if (!file) return;
+        setDielineError(null);
+        try {
+            const parsed = await parseUploadedDielineFile(file);
+            setSource({ kind: 'uploaded-dieline', ...parsed });
+            setLineTaggingMode(true);
+        } catch (e) {
+            setDielineError((e as Error).message || 'Could not parse dieline file.');
+        } finally {
+            if (dielineInputRef.current) dielineInputRef.current.value = '';
+        }
+    };
 
     // Previews of every style from its default size (cheap: a few ms for all of them).
     const previews = useMemo(() => {
@@ -189,6 +216,54 @@ export default function BoxSettings({ products, params, errors, onPickProduct }:
                         );
                     })}
                 </div>
+            </section>
+
+            <section>
+                <SectionTitle>Custom dieline (SVG / DXF)</SectionTitle>
+                <input
+                    ref={dielineInputRef}
+                    type="file"
+                    accept=".svg,.dxf,image/svg+xml"
+                    className="hidden"
+                    onChange={(e) => void onUploadDieline(e.target.files?.[0])}
+                />
+                <button
+                    type="button"
+                    onClick={() => dielineInputRef.current?.click()}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 px-3 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-violet-400 hover:bg-violet-50/50 hover:text-violet-700"
+                >
+                    <Upload className="size-3.5" />
+                    Upload custom dieline
+                </button>
+                {dielineError && <p className="mt-2 rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700">{dielineError}</p>}
+                {source.kind === 'uploaded-dieline' && (
+                    <div className="mt-2.5 rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="font-semibold text-slate-800">Line tagging</span>
+                            <span className="text-[11px] text-slate-500 tabular-nums">
+                                {(source.lines ?? []).filter((l) => l.tag === 'cut').length} cut ·{' '}
+                                {(source.lines ?? []).filter((l) => l.tag === 'fold').length} fold
+                            </span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                            Enable tagging, then click any line on the canvas to switch it between Cut (solid) and Fold (dashed).
+                        </p>
+                        <button
+                            type="button"
+                            aria-pressed={lineTaggingMode}
+                            onClick={() => setLineTaggingMode(!lineTaggingMode)}
+                            className={cn(
+                                'mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition',
+                                lineTaggingMode
+                                    ? 'bg-rose-600 text-white shadow-sm'
+                                    : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+                            )}
+                        >
+                            <Scissors className="size-3.5" />
+                            {lineTaggingMode ? 'Tagging active (click lines)' : 'Tag cut / fold lines'}
+                        </button>
+                    </div>
+                )}
             </section>
 
             {params && (

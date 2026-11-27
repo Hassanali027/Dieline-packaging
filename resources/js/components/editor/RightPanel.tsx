@@ -1,13 +1,15 @@
+import FoldMappingPanel from '@/components/preview3d/FoldMappingPanel';
 import type { SheetTextures } from '@/hooks/use-sheet-textures';
 import { toMm } from '@/lib/dieline';
 import { downloadText } from '@/lib/export/download';
 import { dielineFileName, dielineToSvg } from '@/lib/export/svg';
 import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
-import { useEditorStore, type CameraPreset } from '@/store/useEditorStore';
+import { surfaceObjects, useEditorStore, type CameraPreset } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
-import { Box, Download, Layers, MousePointerClick, Ruler, Scissors } from 'lucide-react';
+import { AlertTriangle, Box, Download, Eye, Layers, MousePointerClick, Ruler, Scissors, Sparkles } from 'lucide-react';
 import { lazy, Suspense, type ReactNode } from 'react';
+import { LOW_PRINT_DPI, lowDpiImages } from './objects';
 
 // Three.js is large; load the 3D view in its own chunk so the 2D editor paints first.
 const Preview3D = lazy(() => import('@/components/preview3d/Preview3D'));
@@ -59,29 +61,23 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
     const activeSide = useEditorStore((s) => s.activeSide);
     const foldProgress = useEditorStore((s) => s.foldProgress);
     const setFoldProgress = useEditorStore((s) => s.setFoldProgress);
+    const xRay = useEditorStore((s) => s.xRay);
+    const toggleXRay = useEditorStore((s) => s.toggleXRay);
     const cameraPreset = useEditorStore((s) => s.cameraPreset);
     const setCameraPreset = useEditorStore((s) => s.setCameraPreset);
+    const source = useEditorStore((s) => s.design.source);
+    const updateUploadedPanels = useEditorStore((s) => s.updateUploadedPanels);
     const material = useEditorStore((s) => s.design.material);
+    const finish = useEditorStore((s) => s.design.finish);
+    const setFinish = useEditorStore((s) => s.setFinish);
     const faceColors = useEditorStore((s) => s.design.faceColors);
     const setFaceColor = useEditorStore((s) => s.setFaceColor);
     const selectedPanelId = useEditorStore((s) => s.selectedPanelId);
     const setSelectedPanelId = useEditorStore((s) => s.setSelectedPanelId);
     const activePart = useEditorStore((s) => s.activePart);
-    const source = useEditorStore((s) => s.design.source);
-
-    const downloadCustomizedSvg = () => {
-        const surfaceKey = activePart ?? 'main';
-        const canvas = textures?.surfaces[surfaceKey]?.[activeSide];
-        let artworkDataUrl: string | undefined;
-        try {
-            artworkDataUrl = canvas?.toDataURL('image/png');
-        } catch {
-            artworkDataUrl = undefined;
-        }
-        const rawName = source.kind === 'uploaded-dieline' ? source.fileId.replace(/\.svg$/i, '') : dielineFileName(params, '').replace(/\.$/, '');
-        const name = `${rawName.replace(/[^a-zA-Z0-9_-]+/g, '-') || 'dieline'}-customized.svg`;
-        downloadText(name, dielineToSvg(sheet!, { params: params ?? undefined, artworkDataUrl, title: `${rawName} customized dieline` }));
-    };
+    const setSelectedObjectIds = useEditorStore((s) => s.setSelectedObjectIds);
+    const objects = useEditorStore((s) => surfaceObjects(s.design, activePart, activeSide));
+    const dpiWarnings = lowDpiImages(objects);
 
     const size = params
         ? {
@@ -90,14 +86,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
               depth: toMm(params.depth, params.unit),
               thickness: toMm(params.thickness, params.unit),
           }
-        : result
-          ? {
-                length: result.overallSize.width,
-                width: result.overallSize.height,
-                depth: Math.max(1, Math.min(result.overallSize.width, result.overallSize.height) / 3),
-                thickness: 1.5,
-            }
-          : null;
+        : null;
 
     const rigid = !!result?.parts?.length;
     const selectedPanel = result?.panels.find((p) => p.id === selectedPanelId) ?? null;
@@ -111,6 +100,17 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
                     Live 3D
                 </div>
+                <button
+                    type="button"
+                    onClick={toggleXRay}
+                    className={cn(
+                        'absolute top-3 right-3 z-10 flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-wide uppercase backdrop-blur transition',
+                        xRay ? 'bg-violet-500 text-white shadow' : 'bg-white/10 text-white/80 hover:bg-white/20',
+                    )}
+                >
+                    <Eye className="size-3" />
+                    X-Ray
+                </button>
                 <div className="relative aspect-[1/1]">
                     <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-white/50">Loading 3D…</div>}>
                         <Preview3D
@@ -120,6 +120,8 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                             size={size}
                             progress={foldProgress}
                             material={material}
+                            finish={finish}
+                            xRay={xRay}
                             faceColors={faceColors}
                             cameraPreset={cameraPreset}
                             selectedPanelId={selectedPanelId}
@@ -155,7 +157,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
 
             {/* Open / close */}
             <Card
-                title={params?.style === 'rigid-drawer' ? 'Drawer' : rigid ? 'Lid' : 'Fold'}
+                title={rigid ? 'Lid' : 'Fold'}
                 icon={<Box className="size-3.5" />}
                 aside={<span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700 tabular-nums">{percent}%</span>}
             >
@@ -176,6 +178,67 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     <span>{rigid ? 'Closed' : 'Folded'}</span>
                 </div>
             </Card>
+
+            {/* Surface finish */}
+            <Card title="Finish" icon={<Sparkles className="size-3.5" />}>
+                <div className="flex flex-col gap-2.5">
+                    <div className="grid grid-cols-3 gap-1.5">
+                        {(['matte', 'gloss', 'soft-touch'] as const).map((lam) => (
+                            <button
+                                key={lam}
+                                type="button"
+                                onClick={() => setFinish({ lamination: lam })}
+                                className={cn(
+                                    'rounded-lg py-1.5 text-[11px] font-semibold capitalize transition',
+                                    (finish?.lamination ?? 'matte') === lam
+                                        ? 'bg-slate-900 text-white'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                                )}
+                            >
+                                {lam}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex gap-1">
+                            {(['none', 'gold', 'silver'] as const).map((foil) => (
+                                <button
+                                    key={foil}
+                                    type="button"
+                                    onClick={() => setFinish({ foil })}
+                                    className={cn(
+                                        'rounded-lg px-2.5 py-1 text-[11px] font-semibold capitalize transition',
+                                        (finish?.foil ?? 'none') === foil
+                                            ? 'bg-slate-900 text-white'
+                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                                    )}
+                                >
+                                    {foil === 'none' ? 'No foil' : `${foil} foil`}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setFinish({ spotUv: !finish?.spotUv })}
+                            className={cn(
+                                'rounded-lg px-2.5 py-1 text-[11px] font-semibold transition',
+                                finish?.spotUv ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                            )}
+                        >
+                            Spot UV
+                        </button>
+                    </div>
+                </div>
+            </Card>
+
+            {source.kind === 'uploaded-dieline' && (
+                <FoldMappingPanel
+                    panels={source.panels}
+                    selectedPanelId={selectedPanelId}
+                    onSelectPanel={setSelectedPanelId}
+                    onChangePanels={(panels) => updateUploadedPanels(panels, true)}
+                />
+            )}
 
             {/* Selected panel */}
             <Card title="Panel" icon={<MousePointerClick className="size-3.5" />}>
@@ -223,7 +286,41 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                         <Legend color="#e11d48" label="Crease" dashed />
                         <Legend color="#38bdf8" label="Bleed" dashed />
                         <Legend color="#22c55e" label="Safe" dashed />
+                        {sheet.panels.some((p) => p.id.includes('turnin-')) && <Legend color="#d97706" label="Turn-in" dashed />}
                     </div>
+                </Card>
+            )}
+
+            {dpiWarnings.length > 0 && (
+                <Card
+                    title="Print quality"
+                    icon={<AlertTriangle className="size-3.5 text-amber-500" />}
+                    aside={
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 tabular-nums">
+                            {dpiWarnings.length} low DPI
+                        </span>
+                    }
+                >
+                    <p className="mb-2 text-xs text-slate-600">Images below 300 DPI may print blurry. Click an item to select and resize it.</p>
+                    <ul className="flex flex-col gap-1.5">
+                        {dpiWarnings.map(({ object, dpi }, idx) => (
+                            <li key={object.id}>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedObjectIds([object.id])}
+                                    className={cn(
+                                        'flex w-full items-center justify-between rounded-xl border px-2.5 py-1.5 text-left text-xs transition hover:border-slate-300',
+                                        dpi < LOW_PRINT_DPI
+                                            ? 'border-rose-200 bg-rose-50/60 text-rose-800'
+                                            : 'border-amber-200 bg-amber-50/60 text-amber-800',
+                                    )}
+                                >
+                                    <span className="truncate font-medium">{String(object.props.name || `Image ${idx + 1}`)}</span>
+                                    <span className="font-bold tabular-nums">{dpi} DPI</span>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
                 </Card>
             )}
 
@@ -246,7 +343,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
             {sheet && (
                 <button
                     type="button"
-                    onClick={downloadCustomizedSvg}
+                    onClick={() => downloadText(dielineFileName(params), dielineToSvg(sheet, { params: params ?? undefined }))}
                     className="group flex shrink-0 items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-3 text-left transition hover:border-violet-300 hover:shadow-md hover:shadow-violet-100"
                 >
                     <span className="flex size-10 items-center justify-center rounded-xl bg-slate-900 text-white transition group-hover:bg-violet-600">
@@ -254,7 +351,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                     </span>
                     <span className="flex-1">
                         <span className="block text-sm font-semibold text-slate-900">Download dieline</span>
-                        <span className="block text-[11px] text-slate-500">Customized artwork + cut, crease, bleed and safe layers</span>
+                        <span className="block text-[11px] text-slate-500">Layered SVG · cut, crease, bleed, safe</span>
                     </span>
                     <Download className="size-4 text-slate-400 transition group-hover:text-violet-600" />
                 </button>

@@ -75,6 +75,32 @@ export function createShare(design: Design, contact: ShareContact): Promise<{ da
     return api('/api/share', { method: 'POST', body: JSON.stringify({ ...contact, design }) });
 }
 
+export type QuoteRequest = {
+    customer_name: string;
+    customer_email: string;
+    customer_phone: string;
+    company_name?: string;
+    length: number;
+    width: number;
+    depth: number;
+    unit: 'mm' | 'in';
+    quantity: number;
+    construction?: 'folding' | 'corrugated' | 'rigid';
+    board_thickness?: string;
+    paper?: string;
+    finishes?: string[];
+    insert_type?: string;
+    notes?: string;
+    design_id?: number | null;
+    outside_png?: string;
+    inside_png?: string;
+};
+
+/** "Submit & get a quote" (emails the customer and the admin). */
+export function submitQuote(request: QuoteRequest): Promise<{ data: { id: number; status: string } }> {
+    return api('/api/quotes', { method: 'POST', body: JSON.stringify(request) });
+}
+
 export function uploadImage(file: File): Promise<{ data: UploadedAsset }> {
     const form = new FormData();
     form.append('file', file);

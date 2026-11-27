@@ -73,25 +73,18 @@ export type ChipboardPiece = {
     quantity: number;
 };
 
+export type DielineLineTag = {
+    id: string;
+    path: string;
+    tag: 'cut' | 'fold';
+    label?: string;
+};
+
 export type BoxSource =
     | { kind: 'parametric'; params: BoxParams }
-    | {
-          kind: 'uploaded-dieline';
-          fileId: string;
-          panels: Panel[];
-          foldMapped: boolean;
-          lines?: UploadedDielineLine[];
-          /** SVG artboard dimensions after applying the user's physical scale. */
-          widthMm?: number;
-          heightMm?: number;
-          /** Pixel-based SVGs need an explicit physical-size confirmation. */
-          unit?: string;
-          scaleConfirmed?: boolean;
-      }
+    | { kind: 'uploaded-dieline'; fileId: string; panels: Panel[]; foldMapped: boolean; lines?: DielineLineTag[] }
     | { kind: 'uploaded-model'; glbUrl: string; uvLayout: UvFace[] }
     | { kind: 'photo-mockup'; photoUrl: string; quad: [Pt, Pt, Pt, Pt] };
-
-export type UploadedDielineLine = { id: string; a: Pt; b: Pt; kind: 'cut' | 'crease' | 'unknown' };
 
 export type CanvasObject = {
     id: string;

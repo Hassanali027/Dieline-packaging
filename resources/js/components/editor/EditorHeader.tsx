@@ -12,6 +12,8 @@ type Props = {
     autosave: boolean;
     readOnly: boolean;
     onEditCopy: () => void;
+    /** Extra actions before Share (e.g. Get quote). */
+    actions?: ReactNode;
 };
 
 function HeaderIcon({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
@@ -30,7 +32,7 @@ function HeaderIcon({ label, onClick, disabled, children }: { label: string; onC
 }
 
 /** Top app bar: brand, the design being edited, history and the save / share actions. */
-export default function EditorHeader({ productName, defaultName, autosave, readOnly, onEditCopy }: Props) {
+export default function EditorHeader({ productName, defaultName, autosave, readOnly, onEditCopy, actions }: Props) {
     const canUndo = useStore(useEditorStore.temporal, (s) => s.pastStates.length > 0);
     const canRedo = useStore(useEditorStore.temporal, (s) => s.futureStates.length > 0);
     const { undo, redo } = useEditorStore.temporal.getState();
@@ -77,6 +79,7 @@ export default function EditorHeader({ productName, defaultName, autosave, readO
                             <Redo2 className="size-4" />
                         </HeaderIcon>
                     </div>
+                    {actions}
                     <ShareDialog />
                 </SaveControls>
             )}

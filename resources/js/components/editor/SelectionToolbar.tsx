@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { CanvasController } from './DielineCanvas';
-import { imageDpi, MIN_PRINT_DPI, MM_PER_PT, objectSize, scaleForSize } from './objects';
+import { imageDpi, LOW_PRINT_DPI, MIN_PRINT_DPI, MM_PER_PT, objectSize, scaleForSize } from './objects';
 
 const round = (v: number, p = 1) => Math.round(v * 10 ** p) / 10 ** p;
 
@@ -313,13 +313,19 @@ export default function SelectionToolbar({ controller }: { controller: RefObject
             {dpi !== null && (
                 <span
                     title={
-                        dpi < MIN_PRINT_DPI
-                            ? 'Below 300 DPI this image may print blurry. Make it smaller or upload a larger file.'
-                            : 'Good print resolution'
+                        dpi < LOW_PRINT_DPI
+                            ? 'Very low resolution (< 150 DPI): this image will print pixelated. Make it smaller or upload a higher-res file.'
+                            : dpi < MIN_PRINT_DPI
+                              ? 'Below 300 DPI this image may print blurry. Make it smaller or upload a larger file.'
+                              : 'Good print resolution'
                     }
                     className={cn(
                         'flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium tabular-nums',
-                        dpi < MIN_PRINT_DPI ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700',
+                        dpi < LOW_PRINT_DPI
+                            ? 'bg-rose-50 text-rose-700'
+                            : dpi < MIN_PRINT_DPI
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-emerald-50 text-emerald-700',
                     )}
                 >
                     {dpi < MIN_PRINT_DPI && <TriangleAlert className="size-3.5" />}

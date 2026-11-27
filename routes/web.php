@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Controllers\Admin\CustomBoxFileController;
 use App\Http\Controllers\Admin\QuoteFileController;
+use App\Http\Controllers\Api\CustomBoxController;
 use App\Http\Controllers\Api\DesignController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\ShareController;
@@ -25,12 +27,19 @@ Route::prefix('api')->name('api.')->middleware('throttle:120,1')->group(function
 
     Route::apiResource('designs', DesignController::class);
 
+    // Customers' own boxes (dieline / 3D model / photo).
+    Route::get('custom-boxes', [CustomBoxController::class, 'index'])->name('custom-boxes.index');
+    Route::post('custom-boxes', [CustomBoxController::class, 'store'])->middleware('throttle:10,1')->name('custom-boxes.store');
+    Route::get('custom-boxes/{customBox}', [CustomBoxController::class, 'show'])->name('custom-boxes.show');
+    Route::get('custom-boxes/{customBox}/file', [CustomBoxController::class, 'file'])->name('custom-boxes.file');
+
     Route::post('share', [ShareController::class, 'store'])->middleware('throttle:shares')->name('share.store');
     Route::post('quotes', [QuoteController::class, 'store'])->middleware('throttle:quotes')->name('quotes.store');
 });
 
 Route::middleware(['auth'])->group(function () {
     Route::get('admin-files/quotes/{quote}/{field}', QuoteFileController::class)->name('admin.quote-file');
+    Route::get('admin-files/custom-boxes/{upload}/{variant}', CustomBoxFileController::class)->name('admin.custom-box-file');
 
     Route::get('dashboard', function () {
         return Inertia::render('dashboard');

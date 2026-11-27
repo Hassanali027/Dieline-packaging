@@ -82,7 +82,22 @@ export type DielineLineTag = {
 
 export type BoxSource =
     | { kind: 'parametric'; params: BoxParams }
-    | { kind: 'uploaded-dieline'; fileId: string; panels: Panel[]; foldMapped: boolean; lines?: DielineLineTag[] }
+    | {
+          kind: 'uploaded-dieline';
+          fileId: string;
+          panels: Panel[];
+          foldMapped: boolean;
+          lines?: DielineLineTag[];
+          /** Size of the drawing in mm (after the unit conversion / the customer's scale). */
+          widthMm?: number;
+          heightMm?: number;
+          /** Unit the file was drawn in (mm, cm, in, pt, px, or "assumed mm"). */
+          unit?: string;
+          /** Things the customer should check (unit guessed, no panels found, …). */
+          warnings?: string[];
+          /** The customer confirmed (or corrected) the real size. */
+          scaleConfirmed?: boolean;
+      }
     | { kind: 'uploaded-model'; glbUrl: string; uvLayout: UvFace[] }
     | { kind: 'photo-mockup'; photoUrl: string; quad: [Pt, Pt, Pt, Pt] };
 

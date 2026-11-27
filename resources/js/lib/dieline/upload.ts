@@ -2,13 +2,115 @@ import type { DielineLineTag, Panel, Pt } from '@/types/design';
 import DxfParser from 'dxf-parser';
 import { bounds, rect } from './geometry';
 import { applyMatrix, ellipsePoints, IDENTITY, multiply, parseTransform, svgPathToPolylines, type Matrix, type Polyline } from './svgPath';
+import { panelsFromLineTags } from './uploadedSvg';
 
 export type ParsedUploadedDieline = {
     fileId: string;
     panels: Panel[];
     lines: DielineLineTag[];
     foldMapped: boolean;
+    widthMm: number;
+    heightMm: number;
+    unit: string;
+    warnings: string[];
+    scaleConfirmed: boolean;
 };
+
+/** Millimetres per unit for the units SVG and CSS allow (unitless SVG lengths are px). */
+const MM_PER_UNIT: Record<string, number> = { mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, px: 25.4 / 96 };
+
+/**
+ * How many mm one SVG user unit is, from the root's width / height and viewBox. A file with
+ * a physical width (e.g. width="210mm") is exact; pixels follow CSS (96 per inch) but are a
+ * guess about how it was drawn; a file without any size is taken as drawn in mm. Anything
+ * that is a guess comes with a warning so the customer confirms the real size.
+ */
+function svgUnitScale(svg: Element): { mmPerUnit: number; unit: string; warnings: string[] } {
+    const length = (raw: string | null) => {
+        const m = raw?.trim().match(/^([\d.]+(?:e[+-]?\d+)?)\s*(mm|cm|in|pt|pc|px)?$/i);
+        return m ? { value: Number(m[1]), unit: (m[2] ?? 'px').toLowerCase() } : null;
+    };
+    const width = length(svg.getAttribute('width'));
+    const vb = svg
+        .getAttribute('viewBox')
+        ?.trim()
+        .split(/[\s,]+/)
+        .map(Number);
+    const vbWidth = vb && vb.length === 4 && vb[2] > 0 ? vb[2] : null;
+    if (!width) {
+        return {
+            mmPerUnit: 1,
+            unit: 'assumed mm',
+            warnings: ['The file has no physical size, so it was read as millimetres. Check the size below.'],
+        };
+    }
+    const mmWidth = width.value * MM_PER_UNIT[width.unit];
+    const mmPerUnit = vbWidth ? mmWidth / vbWidth : MM_PER_UNIT[width.unit];
+    const warnings = width.unit === 'px' ? ['The file is measured in pixels (read at 96 per inch). Check the size below.'] : [];
+    return { mmPerUnit, unit: width.unit, warnings };
+}
+
+/** Panels, size and warnings shared by the SVG and DXF readers. Lines are already in mm, from (0, 0). */
+function finishUpload(
+    fileName: string,
+    lines: DielineLineTag[],
+    width: number,
+    height: number,
+    unit: string,
+    warnings: string[],
+): ParsedUploadedDieline {
+    let panels = panelsFromLineTags(lines);
+    if (!panels.length) {
+        warnings.push('No closed cut outline was found, so the 3D fold preview is off. Tag the outline lines as Cut.');
+        panels = [
+            {
+                id: 'uploaded-sheet',
+                name: fileName.replace(/\.[^.]+$/, '') || 'Custom dieline',
+                polygon: rect(0, 0, width, height),
+                foldAngle: 0,
+                side: 'outside',
+            },
+        ];
+    } else if (panels.length === 1 && lines.some((l) => l.tag === 'fold')) {
+        warnings.push('The fold lines do not cross the outline from edge to edge, so no panels were split off. Fold mapping needs them.');
+    }
+    return {
+        fileId: `${fileName}-${Date.now().toString(36)}`,
+        panels,
+        lines,
+        foldMapped: panels.some((p) => p.parentId),
+        widthMm: width,
+        heightMm: height,
+        unit,
+        warnings,
+        scaleConfirmed: warnings.length === 0,
+    };
+}
+
+/** Resizes an uploaded dieline (the customer corrected its real width). */
+export function scaleUploadedDieline<T extends { panels: Panel[]; lines?: DielineLineTag[]; widthMm?: number; heightMm?: number }>(
+    source: T,
+    factor: number,
+): T {
+    if (!(factor > 0) || !Number.isFinite(factor)) return source;
+    const s = (p: Pt): Pt => ({ x: Math.round(p.x * factor * 1000) / 1000, y: Math.round(p.y * factor * 1000) / 1000 });
+    return {
+        ...source,
+        panels: source.panels.map((panel) => ({
+            ...panel,
+            polygon: panel.polygon.map(s),
+            hinge: panel.hinge ? { a: s(panel.hinge.a), b: s(panel.hinge.b) } : undefined,
+        })),
+        lines: source.lines?.map((line) => ({
+            ...line,
+            path: svgPathToPolylines(line.path)
+                .map((pl) => pointsToPath(pl.pts.map(s), pl.closed))
+                .join(' '),
+        })),
+        widthMm: source.widthMm !== undefined ? source.widthMm * factor : undefined,
+        heightMm: source.heightMm !== undefined ? source.heightMm * factor : undefined,
+    };
+}
 
 function pointsToPath(pts: Pt[], closed = false): string {
     if (!pts.length) return '';
@@ -112,11 +214,13 @@ export function parseSvgDieline(svgText: string, fileName: string): ParsedUpload
         throw new Error('Could not parse SVG file.');
     }
 
+    const { mmPerUnit, unit, warnings } = svgUnitScale(doc.documentElement);
+    const toMm = (p: Pt): Pt => ({ x: p.x * mmPerUnit, y: p.y * mmPerUnit });
     const rawLines: { tag: 'cut' | 'fold'; polylines: Polyline[] }[] = [];
     doc.querySelectorAll('path, line, rect, circle, ellipse, polygon, polyline').forEach((el) => {
         if (el.closest(NON_RENDERED)) return;
         const m = elementMatrix(el);
-        const polylines = elementPolylines(el).map((l) => ({ ...l, pts: l.pts.map((pt) => applyMatrix(m, pt)) }));
+        const polylines = elementPolylines(el).map((l) => ({ ...l, pts: l.pts.map((pt) => toMm(applyMatrix(m, pt))) }));
         if (polylines.length) rawLines.push({ tag: isLikelyFoldStyle(el) ? 'fold' : 'cut', polylines });
     });
 
@@ -136,22 +240,7 @@ export function parseSvgDieline(svgText: string, fileName: string): ParsedUpload
         tag: l.tag,
     }));
 
-    const panels: Panel[] = [
-        {
-            id: 'uploaded-sheet',
-            name: fileName.replace(/\.[^.]+$/, '') || 'Custom dieline',
-            polygon: rect(0, 0, width, height),
-            foldAngle: 0,
-            side: 'outside',
-        },
-    ];
-
-    return {
-        fileId: `${fileName}-${Date.now().toString(36)}`,
-        panels,
-        lines,
-        foldMapped: lines.some((l) => l.tag === 'fold'),
-    };
+    return finishUpload(fileName, lines, width, height, unit, warnings);
 }
 
 /** Parses an uploaded DXF dieline into normalized `DielineLineTag[]` (mm). */
@@ -159,6 +248,11 @@ export function parseDxfDieline(dxfText: string, fileName: string): ParsedUpload
     const parser = new DxfParser();
     const dxf = parser.parseSync(dxfText);
     const entities = dxf?.entities ?? [];
+    // $INSUNITS: 1 inch, 2 feet, 4 mm, 5 cm, 6 m. Missing / 0 = unitless: read as mm and ask to confirm.
+    const insUnits = Number((dxf?.header as Record<string, unknown> | undefined)?.['$INSUNITS'] ?? 0);
+    const dxfUnits: Record<number, [string, number]> = { 1: ['in', 25.4], 2: ['ft', 304.8], 4: ['mm', 1], 5: ['cm', 10], 6: ['m', 1000] };
+    const [unit, mmPerUnit] = dxfUnits[insUnits] ?? ['assumed mm', 1];
+    const warnings = dxfUnits[insUnits] ? [] : ['The DXF does not say which unit it uses, so it was read as millimetres. Check the size below.'];
 
     const rawLines: { pts: Pt[]; closed: boolean; tag: 'cut' | 'fold' }[] = [];
     for (const ent of entities as Array<{
@@ -175,7 +269,7 @@ export function parseDxfDieline(dxfText: string, fileName: string): ParsedUpload
             ent.vertices.length >= 2
         ) {
             // Flip Y because DXF Y points up while SVG/Fabric Y points down.
-            const pts = ent.vertices.map((v) => ({ x: v.x, y: -v.y }));
+            const pts = ent.vertices.map((v) => ({ x: v.x * mmPerUnit, y: -v.y * mmPerUnit }));
             rawLines.push({ pts, closed: !!ent.shape, tag });
         }
     }
@@ -200,22 +294,7 @@ export function parseDxfDieline(dxfText: string, fileName: string): ParsedUpload
         tag: l.tag,
     }));
 
-    const panels: Panel[] = [
-        {
-            id: 'uploaded-sheet',
-            name: fileName.replace(/\.[^.]+$/, '') || 'Custom dieline',
-            polygon: rect(0, 0, width, height),
-            foldAngle: 0,
-            side: 'outside',
-        },
-    ];
-
-    return {
-        fileId: `${fileName}-${Date.now().toString(36)}`,
-        panels,
-        lines,
-        foldMapped: lines.some((l) => l.tag === 'fold'),
-    };
+    return finishUpload(fileName, lines, width, height, unit, warnings);
 }
 
 export async function parseUploadedDielineFile(file: File): Promise<ParsedUploadedDieline> {

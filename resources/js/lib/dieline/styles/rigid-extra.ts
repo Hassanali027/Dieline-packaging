@@ -62,7 +62,10 @@ function drawerSleevePanels(length: number, width: number, height: number, turnI
     for (const face of faces.slice(0, 4)) {
         const y0 = face.y;
         const y1 = face.y + face.height;
-        for (const [end, x, outward] of [['left', 0, -1], ['right', length, 1]] as const) {
+        for (const [end, x, outward] of [
+            ['left', 0, -1],
+            ['right', length, 1],
+        ] as const) {
             const free = x + outward * ti;
             panels.push({
                 id: `sleeve-turnin-${face.id}-${end}`,
@@ -80,7 +83,13 @@ function drawerSleevePanels(length: number, width: number, height: number, turnI
 }
 
 function piecesFor(part: ChipboardPiece['part'], dims: [string, number, number, number][]): ChipboardPiece[] {
-    return dims.map(([name, width, height, quantity]) => ({ part, name, width: Math.round(width * 10) / 10, height: Math.round(height * 10) / 10, quantity }));
+    return dims.map(([name, width, height, quantity]) => ({
+        part,
+        name,
+        width: Math.round(width * 10) / 10,
+        height: Math.round(height * 10) / 10,
+        quantity,
+    }));
 }
 
 function packParts(groups: Panel[][], gap = 25): Panel[] {
@@ -91,11 +100,15 @@ function packParts(groups: Panel[][], gap = 25): Panel[] {
         const box = bounds(group.map((panel) => panel.polygon));
         const dx = x - box.minX;
         const dy = -box.minY;
-        output.push(...group.map((panel) => ({
-            ...panel,
-            polygon: translate(panel.polygon, dx, dy),
-            hinge: panel.hinge ? { a: pt(panel.hinge.a.x + dx, panel.hinge.a.y + dy), b: pt(panel.hinge.b.x + dx, panel.hinge.b.y + dy) } : undefined,
-        })));
+        output.push(
+            ...group.map((panel) => ({
+                ...panel,
+                polygon: translate(panel.polygon, dx, dy),
+                hinge: panel.hinge
+                    ? { a: pt(panel.hinge.a.x + dx, panel.hinge.a.y + dy), b: pt(panel.hinge.b.x + dx, panel.hinge.b.y + dy) }
+                    : undefined,
+            })),
+        );
         x += box.width + gap;
     }
     return output;
@@ -129,12 +142,17 @@ export function generateRigidDrawer(params: BoxParams): DielineResult {
 export function generateRigidShoulder(params: BoxParams): DielineResult {
     const s = rigidSizes(params);
     const board = s.board;
-    const shoulderHeight = params.rigid?.shoulderHeight === undefined
-        ? Math.max(12, board * 4)
-        : toMm(params.rigid.shoulderHeight, params.unit);
+    const shoulderHeight = params.rigid?.shoulderHeight === undefined ? Math.max(12, board * 4) : toMm(params.rigid.shoulderHeight, params.unit);
     const base = wrapPanels('base', s.base.length, s.base.width, s.base.height - board, s.turnIn, board);
     const liner = linerPanels(s.liner.length, s.liner.width, s.liner.wall);
-    const neck = perimeterBand('sleeve', s.base.length - 2 * board, s.base.width - 2 * board, shoulderHeight, Math.max(10, board * 4), 'Shoulder Neck');
+    const neck = perimeterBand(
+        'sleeve',
+        s.base.length - 2 * board,
+        s.base.width - 2 * board,
+        shoulderHeight,
+        Math.max(10, board * 4),
+        'Shoulder Neck',
+    );
     const lid = wrapPanels('lid', s.lid.length, s.lid.width, Math.min(s.lid.height, shoulderHeight + board), s.turnIn, board);
     const panels = packParts([base, liner, neck, lid]);
     const chipboard = [
@@ -170,7 +188,9 @@ function bookCoverPanels(length: number, width: number, spine: number, turnIn: n
         id: `lid-${face.id}`,
         name: face.name,
         polygon: rect(face.x, y, face.w, width),
-        ...(face.parent && face.hingeX !== undefined ? { parentId: face.parent, hinge: { a: pt(face.hingeX, y), b: pt(face.hingeX, y + width) } } : {}),
+        ...(face.parent && face.hingeX !== undefined
+            ? { parentId: face.parent, hinge: { a: pt(face.hingeX, y), b: pt(face.hingeX, y + width) } }
+            : {}),
         foldAngle: face.angle,
         side: 'outside',
         part: 'lid',
@@ -183,14 +203,18 @@ function bookCoverPanels(length: number, width: number, spine: number, turnIn: n
         ['front-right', pt(frontX + length, y), pt(frontX + length, y + width), pt(1, 0)],
         ['front-top', pt(frontX, y), pt(frontX + length, y), pt(0, -1)],
         ['front-bottom', pt(frontX, y + width), pt(frontX + length, y + width), pt(0, 1)],
+        // The spine's paper also has to turn in at both ends, or the spine board's edges stay bare.
+        ['spine-top', pt(spineX, y), pt(frontX, y), pt(0, -1)],
+        ['spine-bottom', pt(spineX, y + width), pt(frontX, y + width), pt(0, 1)],
     ];
     for (const [id, a, b, out] of edges) {
-        const dx = out.x * turnIn; const dy = out.y * turnIn;
+        const dx = out.x * turnIn;
+        const dy = out.y * turnIn;
         const edgeLength = Math.hypot(b.x - a.x, b.y - a.y);
         const taper = Math.min(turnIn, Math.max(0, edgeLength / 2 - 0.5));
         const ux = (b.x - a.x) / edgeLength;
         const uy = (b.y - a.y) / edgeLength;
-        const parentId = id.startsWith('back') ? 'lid-back' : 'lid-front';
+        const parentId = id.startsWith('back') ? 'lid-back' : id.startsWith('spine') ? 'lid-spine' : 'lid-front';
         panels.push({
             id: `lid-turnin-${id}`,
             name: `Cover Turn-in ${id.replace('-', ' ')}`,
@@ -227,6 +251,7 @@ export function generateRigidBook(params: BoxParams): DielineResult {
         ]),
         ...piecesFor('lid', [
             ['Book back board', s.lid.length, s.lid.width, 1],
+            ['Book spine board', s.base.height, s.lid.width, 1],
             ['Book front board', s.lid.length, s.lid.width, 1],
         ]),
     ];

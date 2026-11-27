@@ -53,7 +53,6 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     const activePart = useEditorStore((s) => s.activePart);
     const setActivePart = useEditorStore((s) => s.setActivePart);
     const designParts = useEditorStore((s) => s.design.parts);
-    const source = useEditorStore((s) => s.design.source);
     const showTurnInWarning = useEditorStore((s) => s.showTurnInWarning);
     const toggleTurnInWarning = useEditorStore((s) => s.toggleTurnInWarning);
     const lineTaggingMode = useEditorStore((s) => s.lineTaggingMode);
@@ -105,10 +104,11 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     // The box being designed right now. The URL's product is only the starting point: picking
     // another style, opening a saved design or restoring a draft can change it.
     const currentProduct = products.find((p) => p.style === params?.style) ?? activeProduct;
-    const editorTitle = source.kind === 'uploaded-dieline' ? source.fileId : currentProduct?.name ?? 'Box';
-    const defaultDesignName = source.kind === 'uploaded-dieline'
-        ? `${source.fileId.replace(/\.svg$/i, '')} design`
-        : `${currentProduct?.name ?? 'Box'} design`;
+    // fileId is "<file name>-<upload stamp>": show the file's own name, without stamp or extension.
+    const uploadName =
+        source.kind === 'uploaded-dieline' ? source.fileId.replace(/-[a-z0-9]+$/i, '').replace(/\.[a-z0-9]+$/i, '') || 'Custom dieline' : null;
+    const editorTitle = uploadName ?? currentProduct?.name ?? 'Box';
+    const defaultDesignName = `${editorTitle} design`;
 
     const pickProduct = (product: ProductItem) => {
         setSelectedPanelId(null);

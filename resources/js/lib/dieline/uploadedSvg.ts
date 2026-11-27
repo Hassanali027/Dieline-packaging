@@ -1,5 +1,10 @@
-import type { Panel, Pt, UploadedDielineLine } from '../../types/design';
+import type { DielineLineTag, Panel, Pt } from '../../types/design';
+import { autoBuildFoldTreeFromBase } from '../three/foldMapping';
+import { signedArea } from './geometry';
+import { svgPathToPolylines } from './svgPath';
 
+/** One straight segment of an uploaded dieline, classified as cut, crease or not yet known. */
+export type UploadedDielineLine = { id: string; a: Pt; b: Pt; kind: 'cut' | 'crease' | 'unknown' };
 export type SvgLine = UploadedDielineLine;
 export type ParsedSvgDieline = { panels: Panel[]; lines: SvgLine[]; width: number; height: number; unit: string; warnings: string[] };
 
@@ -26,7 +31,8 @@ function attr(tag: string, name: string): string | undefined {
 }
 
 function lineKind(tag: string): SvgLine['kind'] {
-    const hints = `${attr(tag, 'id') ?? ''} ${attr(tag, 'class') ?? ''} ${attr(tag, 'data-layer') ?? ''} ${attr(tag, 'stroke') ?? ''} ${attr(tag, 'stroke-dasharray') ?? ''}`.toLowerCase();
+    const hints =
+        `${attr(tag, 'id') ?? ''} ${attr(tag, 'class') ?? ''} ${attr(tag, 'data-layer') ?? ''} ${attr(tag, 'stroke') ?? ''} ${attr(tag, 'stroke-dasharray') ?? ''}`.toLowerCase();
     if (/crease|fold|score|dash|#00ff00|#00a000|#00a0e9/.test(hints)) return 'crease';
     if (/cut|knife|#ff0000|#ff000|#f00|#ec008c/.test(hints)) return 'cut';
     return 'unknown';
@@ -74,7 +80,11 @@ function splitPolygon(polygon: Pt[], a: Pt, b: Pt): [Pt[], Pt[]] | null {
 }
 
 function hasEdge(panel: Panel, a: Pt, b: Pt): boolean {
-    return panel.polygon.some((p, i) => same(p, a) && same(panel.polygon[(i + 1) % panel.polygon.length], b) || same(p, b) && same(panel.polygon[(i + 1) % panel.polygon.length], a));
+    return panel.polygon.some(
+        (p, i) =>
+            (same(p, a) && same(panel.polygon[(i + 1) % panel.polygon.length], b)) ||
+            (same(p, b) && same(panel.polygon[(i + 1) % panel.polygon.length], a)),
+    );
 }
 
 /** Recover closed outlines from connected cut strokes (common in CAD-exported SVG files). */
@@ -84,8 +94,10 @@ function cutLoops(lines: SvgLine[]): Pt[][] {
     const points = new Map<string, Pt>();
     const adjacency = new Map<string, number[]>();
     const edges = cuts.map((line, index) => {
-        const a = key(line.a); const b = key(line.b);
-        points.set(a, line.a); points.set(b, line.b);
+        const a = key(line.a);
+        const b = key(line.b);
+        points.set(a, line.a);
+        points.set(b, line.b);
         adjacency.set(a, [...(adjacency.get(a) ?? []), index]);
         adjacency.set(b, [...(adjacency.get(b) ?? []), index]);
         return { a, b };
@@ -138,26 +150,58 @@ function cutLoops(lines: SvgLine[]): Pt[][] {
 export function mapSvgCreasesToPanels(input: Panel[], lines: SvgLine[]): Panel[] {
     let panels = input.map((panel) => ({ ...panel, polygon: [...panel.polygon] }));
     for (const line of lines.filter((item) => item.kind === 'crease')) {
-        const alreadyAnEdge = panels.some((panel) => hasEdge(panel, line.a, line.b));
-        if (alreadyAnEdge) continue;
-        for (let i = 0; i < panels.length; i++) {
-            const split = splitPolygon(panels[i].polygon, line.a, line.b);
-            if (!split) continue;
-            const original = panels[i];
-            panels.splice(i, 1,
-                { ...original, id: `${original.id}-a`, name: `${original.name} A`, polygon: split[0] },
-                { ...original, id: `${original.id}-b`, name: `${original.name} B`, polygon: split[1] },
+        if (panels.some((panel) => hasEdge(panel, line.a, line.b))) continue;
+        // A long crease (e.g. across all the walls of a carton) crosses several panels: split each.
+        const next: Panel[] = [];
+        for (const panel of panels) {
+            const split = splitPolygon(panel.polygon, line.a, line.b);
+            if (!split) {
+                next.push(panel);
+                continue;
+            }
+            next.push(
+                { ...panel, id: `${panel.id}-a`, name: `${panel.name} A`, polygon: split[0] },
+                { ...panel, id: `${panel.id}-b`, name: `${panel.name} B`, polygon: split[1] },
             );
-            break;
+        }
+        panels = next;
+    }
+    if (panels.length < 2) return panels.map((panel) => ({ ...panel, parentId: undefined, hinge: undefined, foldAngle: 0 }));
+
+    // Hinge tree from shared edges, starting at the biggest panel (usually the floor or front);
+    // every panel then folds about the crease it shares with its parent, not all off one root.
+    const base = panels.reduce((a, b) => (Math.abs(signedArea(b.polygon)) > Math.abs(signedArea(a.polygon)) ? b : a));
+    return autoBuildFoldTreeFromBase(panels, base.id, 90);
+}
+
+/**
+ * Panels of an uploaded dieline from its tagged lines (the editor's DielineLineTag list):
+ * closed cut paths and loops of cut segments become outlines, which fold-tagged lines split
+ * into panels linked by hinges. Re-run whenever the customer re-tags a line.
+ */
+export function panelsFromLineTags(tags: DielineLineTag[]): Panel[] {
+    const segments: SvgLine[] = [];
+    const outlines: Pt[][] = [];
+    for (const tag of tags) {
+        for (const line of svgPathToPolylines(tag.path)) {
+            if (tag.tag === 'cut' && line.closed && line.pts.length >= 3) {
+                outlines.push(line.pts);
+                continue;
+            }
+            const count = line.closed ? line.pts.length : line.pts.length - 1;
+            for (let i = 0; i < count; i++) {
+                const a = line.pts[i];
+                const b = line.pts[(i + 1) % line.pts.length];
+                if (!same(a, b)) segments.push({ id: `${tag.id}-${i + 1}`, a, b, kind: tag.tag === 'fold' ? 'crease' : 'cut' });
+            }
         }
     }
-
-    const rootId = panels[0]?.id;
-    return panels.map((panel) => {
-        const crease = lines.find((line) => line.kind === 'crease' && hasEdge(panel, line.a, line.b));
-        if (!crease || panel.id === rootId) return { ...panel, parentId: undefined, hinge: undefined, foldAngle: 0 };
-        return { ...panel, parentId: rootId, hinge: { a: crease.a, b: crease.b }, foldAngle: 90 };
-    });
+    const loops = [...outlines, ...cutLoops(segments)];
+    if (!loops.length) return [];
+    // The outer cut outline holds the panels; small closed cuts inside it (holes, windows) are not panels.
+    const outer = loops.reduce((a, b) => (Math.abs(signedArea(b)) > Math.abs(signedArea(a)) ? b : a));
+    const start: Panel = { id: 'panel-1', name: 'Panel 1', polygon: outer, foldAngle: 0, side: 'outside' };
+    return mapSvgCreasesToPanels([start], segments).map((panel, i) => ({ ...panel, name: `Panel ${i + 1}` }));
 }
 
 function parsePath(tag: string): { subpaths: { points: Pt[]; closed: boolean }[]; unsupported: boolean } {
@@ -168,7 +212,7 @@ function parsePath(tag: string): { subpaths: { points: Pt[]; closed: boolean }[]
     let command = '';
     const subpaths: { points: Pt[]; closed: boolean }[] = [];
     let current: { points: Pt[]; closed: boolean } | null = null;
-    for (let i = 0; i < tokens.length;) {
+    for (let i = 0; i < tokens.length; ) {
         if (/^[a-z]$/i.test(tokens[i])) command = tokens[i++];
         const relative = command === command.toLowerCase();
         const op = command.toUpperCase();
@@ -180,7 +224,8 @@ function parsePath(tag: string): { subpaths: { points: Pt[]; closed: boolean }[]
         }
         if (op === 'M' || op === 'L') {
             if (i + 1 >= tokens.length) return { subpaths: [], unsupported: true };
-            const x = Number(tokens[i++]); const y = Number(tokens[i++]);
+            const x = Number(tokens[i++]);
+            const y = Number(tokens[i++]);
             cursor = { x: relative ? cursor.x + x : x, y: relative ? cursor.y + y : y };
             if (op === 'M') {
                 current = { points: [{ ...cursor }], closed: false };
@@ -192,10 +237,14 @@ function parsePath(tag: string): { subpaths: { points: Pt[]; closed: boolean }[]
             }
         } else if (op === 'H') {
             if (!current) return { subpaths: [], unsupported: true };
-            const x = Number(tokens[i++]); cursor = { ...cursor, x: relative ? cursor.x + x : x }; current.points.push({ ...cursor });
+            const x = Number(tokens[i++]);
+            cursor = { ...cursor, x: relative ? cursor.x + x : x };
+            current.points.push({ ...cursor });
         } else if (op === 'V') {
             if (!current) return { subpaths: [], unsupported: true };
-            const y = Number(tokens[i++]); cursor = { ...cursor, y: relative ? cursor.y + y : y }; current.points.push({ ...cursor });
+            const y = Number(tokens[i++]);
+            cursor = { ...cursor, y: relative ? cursor.y + y : y };
+            current.points.push({ ...cursor });
         } else return { subpaths: [], unsupported: true };
     }
     return { subpaths, unsupported: false };
@@ -206,63 +255,99 @@ export function parseUploadedSvg(source: string): ParsedSvgDieline {
     if (source.length > 10_000_000) throw new Error('SVG exceeds the 10 MB parser limit.');
     if (!/<svg\b/i.test(source) || /<!DOCTYPE|<!ENTITY|<script\b|<foreignObject\b/i.test(source)) throw new Error('File is not a safe SVG dieline.');
     const rootTag = source.match(/<svg\b[^>]*>/i)?.[0] ?? '';
-    const w = length(attr(rootTag, 'width')); const h = length(attr(rootTag, 'height'));
+    const w = length(attr(rootTag, 'width'));
+    const h = length(attr(rootTag, 'height'));
     const vb = attr(rootTag, 'viewBox')?.trim().split(/[ ,]+/).map(Number);
-    if (vb && (vb.length !== 4 || vb.some((value) => !Number.isFinite(value)) || vb[2] <= 0 || vb[3] <= 0)) throw new Error('SVG viewBox is invalid.');
+    if (vb && (vb.length !== 4 || vb.some((value) => !Number.isFinite(value)) || vb[2] <= 0 || vb[3] <= 0))
+        throw new Error('SVG viewBox is invalid.');
     const unit = w?.unit ?? h?.unit ?? (vb ? 'px' : 'mm');
     const unitToMm = unit === 'in' ? 25.4 : unit === 'cm' ? 10 : unit === 'pt' ? 25.4 / 72 : unit === 'px' ? 25.4 / 96 : 1;
-    const width = (w ? w.value * unitToMm : (vb ? vb[2] * unitToMm : 0));
-    const height = (h ? h.value * unitToMm : (vb ? vb[3] * unitToMm : 0));
-    if (!(width > 0 && height > 0 && Number.isFinite(width + height))) throw new Error('SVG needs positive physical width and height or a valid viewBox.');
-    const scaleX = width / (vb?.[2] ?? width); const scaleY = height / (vb?.[3] ?? height);
-    const ox = vb?.[0] ?? 0; const oy = vb?.[1] ?? 0;
+    const width = w ? w.value * unitToMm : vb ? vb[2] * unitToMm : 0;
+    const height = h ? h.value * unitToMm : vb ? vb[3] * unitToMm : 0;
+    if (!(width > 0 && height > 0 && Number.isFinite(width + height)))
+        throw new Error('SVG needs positive physical width and height or a valid viewBox.');
+    const scaleX = width / (vb?.[2] ?? width);
+    const scaleY = height / (vb?.[3] ?? height);
+    const ox = vb?.[0] ?? 0;
+    const oy = vb?.[1] ?? 0;
     const point = (p: Pt): Pt => ({ x: (p.x - ox) * scaleX, y: (p.y - oy) * scaleY });
-    const panels: Panel[] = []; const lines: SvgLine[] = [];
+    const panels: Panel[] = [];
+    const lines: SvgLine[] = [];
     let unsupported = /transform\s*=/.test(source);
     const tags = source.match(/<(?:polygon|polyline|rect|line|path)\b[^>]*>/gi) ?? [];
     for (const [index, tag] of tags.entries()) {
         const name = tag.match(/^<([a-z]+)/i)?.[1]?.toLowerCase();
-        let polygon: Pt[] = []; let isClosed = false;
+        let polygon: Pt[] = [];
+        let isClosed = false;
         if (name === 'polygon' || name === 'polyline') {
             polygon = parsePoints(attr(tag, 'points') ?? '');
             isClosed = name === 'polygon' || (polygon.length > 2 && same(polygon[0], polygon[polygon.length - 1]));
         } else if (name === 'rect') {
-            const x = Number(attr(tag, 'x') ?? 0); const y = Number(attr(tag, 'y') ?? 0);
-            const rw = Number(attr(tag, 'width')); const rh = Number(attr(tag, 'height'));
-            if (rw > 0 && rh > 0) { polygon = [{x,y},{x:x+rw,y},{x:x+rw,y:y+rh},{x,y:y+rh}]; isClosed = true; }
+            const x = Number(attr(tag, 'x') ?? 0);
+            const y = Number(attr(tag, 'y') ?? 0);
+            const rw = Number(attr(tag, 'width'));
+            const rh = Number(attr(tag, 'height'));
+            if (rw > 0 && rh > 0) {
+                polygon = [
+                    { x, y },
+                    { x: x + rw, y },
+                    { x: x + rw, y: y + rh },
+                    { x, y: y + rh },
+                ];
+                isClosed = true;
+            }
         } else if (name === 'path') {
-            const path = parsePath(tag); unsupported ||= path.unsupported;
+            const path = parsePath(tag);
+            unsupported ||= path.unsupported;
             for (const subpath of path.subpaths) {
                 if (subpath.closed && subpath.points.length >= 3) {
-                    panels.push({ id: attr(tag, 'id') ?? `panel-${panels.length + 1}`, name: attr(tag, 'id') ?? `Panel ${panels.length + 1}`, polygon: subpath.points.map(point), foldAngle: 0, side: 'outside' });
+                    panels.push({
+                        id: attr(tag, 'id') ?? `panel-${panels.length + 1}`,
+                        name: attr(tag, 'id') ?? `Panel ${panels.length + 1}`,
+                        polygon: subpath.points.map(point),
+                        foldAngle: 0,
+                        side: 'outside',
+                    });
                 }
                 const count = subpath.closed ? subpath.points.length : subpath.points.length - 1;
                 for (let i = 0; i < count && (!subpath.closed || lineKind(tag) !== 'unknown'); i++) {
-                    const a = point(subpath.points[i]); const b = point(subpath.points[(i + 1) % subpath.points.length]);
+                    const a = point(subpath.points[i]);
+                    const b = point(subpath.points[(i + 1) % subpath.points.length]);
                     if (!same(a, b)) lines.push({ id: `${attr(tag, 'id') ?? `path-${index}`}-${i + 1}`, a, b, kind: lineKind(tag) });
                 }
             }
         } else if (name === 'line') {
             const a = point({ x: Number(attr(tag, 'x1')), y: Number(attr(tag, 'y1')) });
             const b = point({ x: Number(attr(tag, 'x2')), y: Number(attr(tag, 'y2')) });
-            if (Number.isFinite(a.x + a.y + b.x + b.y) && !same(a, b)) lines.push({ id: attr(tag, 'id') ?? `line-${index}`, a, b, kind: lineKind(tag) });
+            if (Number.isFinite(a.x + a.y + b.x + b.y) && !same(a, b))
+                lines.push({ id: attr(tag, 'id') ?? `line-${index}`, a, b, kind: lineKind(tag) });
         }
-        if (isClosed && polygon.length >= 3) panels.push({ id: attr(tag, 'id') ?? `panel-${panels.length + 1}`, name: attr(tag, 'id') ?? `Panel ${panels.length + 1}`, polygon: polygon.map(point), foldAngle: 0, side: 'outside' });
+        if (isClosed && polygon.length >= 3)
+            panels.push({
+                id: attr(tag, 'id') ?? `panel-${panels.length + 1}`,
+                name: attr(tag, 'id') ?? `Panel ${panels.length + 1}`,
+                polygon: polygon.map(point),
+                foldAngle: 0,
+                side: 'outside',
+            });
         if (name === 'polyline') {
             const count = isClosed ? polygon.length - 1 : polygon.length - 1;
             for (let i = 0; i < count; i++) {
-                const a = point(polygon[i]); const b = point(polygon[i + 1]);
+                const a = point(polygon[i]);
+                const b = point(polygon[i + 1]);
                 if (!same(a, b)) lines.push({ id: `${attr(tag, 'id') ?? `polyline-${index}`}-${i + 1}`, a, b, kind: lineKind(tag) });
             }
         }
     }
-    const detectedPanels = panels.length ? panels : cutLoops(lines).map((polygon, index) => ({
-        id: `cut-outline-${index + 1}`,
-        name: `Detected outline ${index + 1}`,
-        polygon,
-        foldAngle: 0,
-        side: 'outside' as const,
-    }));
+    const detectedPanels = panels.length
+        ? panels
+        : cutLoops(lines).map((polygon, index) => ({
+              id: `cut-outline-${index + 1}`,
+              name: `Detected outline ${index + 1}`,
+              polygon,
+              foldAngle: 0,
+              side: 'outside' as const,
+          }));
     const mapped = mapSvgCreasesToPanels(detectedPanels, lines);
     const allPoints = mapped.flatMap((panel) => panel.polygon);
     const minX = allPoints.length ? Math.min(...allPoints.map((p) => p.x)) : 0;
@@ -270,7 +355,9 @@ export function parseUploadedSvg(source: string): ParsedSvgDieline {
     const normalizedPanels = mapped.map((panel) => ({
         ...panel,
         polygon: panel.polygon.map((p) => ({ x: p.x - minX, y: p.y - minY })),
-        hinge: panel.hinge ? { a: { x: panel.hinge.a.x - minX, y: panel.hinge.a.y - minY }, b: { x: panel.hinge.b.x - minX, y: panel.hinge.b.y - minY } } : undefined,
+        hinge: panel.hinge
+            ? { a: { x: panel.hinge.a.x - minX, y: panel.hinge.a.y - minY }, b: { x: panel.hinge.b.x - minX, y: panel.hinge.b.y - minY } }
+            : undefined,
     }));
     const normalizedLines = lines.map((line) => ({
         ...line,
@@ -280,8 +367,11 @@ export function parseUploadedSvg(source: string): ParsedSvgDieline {
     const warnings: string[] = [];
     if (unit === 'px') warnings.push('SVG uses pixels; confirm the physical scale before production.');
     if (unsupported) warnings.push('SVG contains transformed or curved geometry. Simplify it to straight paths before production.');
-    if (!normalizedPanels.length) warnings.push('No closed panel shapes could be inferred from the cut lines. Add a closed outline or correct the cut-line tags.');
-    if (normalizedLines.some((line) => line.kind === 'unknown')) warnings.push('Some lines are unclassified. Tag each as cut or crease before using 3D fold preview.');
-    if (normalizedLines.some((line) => line.kind === 'crease') && normalizedPanels.every((panel) => !panel.parentId)) warnings.push('Crease lines did not split or match panel edges; those folds need manual mapping.');
+    if (!normalizedPanels.length)
+        warnings.push('No closed panel shapes could be inferred from the cut lines. Add a closed outline or correct the cut-line tags.');
+    if (normalizedLines.some((line) => line.kind === 'unknown'))
+        warnings.push('Some lines are unclassified. Tag each as cut or crease before using 3D fold preview.');
+    if (normalizedLines.some((line) => line.kind === 'crease') && normalizedPanels.every((panel) => !panel.parentId))
+        warnings.push('Crease lines did not split or match panel edges; those folds need manual mapping.');
     return { panels: normalizedPanels, lines: normalizedLines, width, height, unit, warnings };
 }

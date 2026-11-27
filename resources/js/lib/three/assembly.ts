@@ -1,7 +1,7 @@
 import { Quaternion, Vector3 } from 'three';
 import type { BoxStyle, DielineResult } from '../../types/design';
 import { extractPart } from '../dieline';
-import { foldedBounds, styleOrientation } from './foldTree';
+import { foldedBounds, styleOrientation, toWorld } from './foldTree';
 
 /**
  * How the 3D view puts a box together (Dev 3). Each piece is one dieline (a whole folding
@@ -51,6 +51,17 @@ export function buildAssembly(style: BoxStyle | undefined, result: DielineResult
 
     const none = new Quaternion();
     const pieces: AssemblyPiece[] = [];
+
+    // Dev 1's rigid styles (Sprint 3): built from their real dielines (lib/dieline/styles/rigid-extra.ts).
+    if (style === 'rigid-drawer' && result.parts.includes('drawer') && result.parts.includes('sleeve')) {
+        return drawerAssembly(result, p, board);
+    }
+    if (style === 'rigid-shoulder' && result.parts.includes('sleeve') && result.parts.includes('lid')) {
+        return shoulderAssembly(result, p, board);
+    }
+    if (style === 'rigid-book' && result.parts.includes('lid') && result.parts.includes('base')) {
+        return bookAssembly(result, p, board);
+    }
 
     // Rigid Drawer box: sleeve stays fixed, inner drawer/tray slides out along +Z as progress -> 0.
     if (style === 'rigid-drawer' || (result.parts.includes('sleeve') && (result.parts.includes('drawer') || result.parts.includes('tray')))) {
@@ -150,5 +161,92 @@ export function buildAssembly(style: BoxStyle | undefined, result: DielineResult
             pieces.push({ key: 'lid', result: lid, fold: 1, orientation: flip, position: [closedPos[0], closedPos[1] + lift, closedPos[2]] });
         }
     }
+    return pieces;
+}
+
+/**
+ * Rigid drawer: the sleeve is a tube open at both ends of its length (world X); the drawer
+ * tray, with its liner, sits on the sleeve floor and slides out along X as the box opens.
+ */
+function drawerAssembly(result: DielineResult, p: number, board: number): AssemblyPiece[] {
+    const none = new Quaternion();
+    const sleeve = extractPart(result, 'sleeve');
+    const drawer = extractPart(result, 'drawer');
+    // Sleeve floor board spans y 0..board; the drawer's outer bottom rests just above it.
+    const sleevePos = centred(sleeve, none, board);
+    const drawerFloor = 2 * board + 0.3;
+    const drawerPos = centred(drawer, none, drawerFloor);
+    const drawerBox = foldedBounds(drawer.panels, 1);
+    const slide = (1 - p) * (drawerBox.max.x - drawerBox.min.x) * 0.75;
+    const pieces: AssemblyPiece[] = [
+        { key: 'sleeve', result: sleeve, fold: 1, orientation: none, position: sleevePos },
+        { key: 'drawer', result: drawer, fold: 1, orientation: none, position: [drawerPos[0] + slide, drawerPos[1], drawerPos[2]] },
+    ];
+    if (result.parts?.includes('liner')) {
+        const liner = extractPart(result, 'liner');
+        const linerPos = centred(liner, none, drawerFloor + 0.3);
+        pieces.push({ key: 'liner', result: liner, fold: 1, orientation: none, position: [linerPos[0] + slide, linerPos[1], linerPos[2]] });
+    }
+    return pieces;
+}
+
+/**
+ * Shoulder box: the base, the neck (a four-wall collar standing up out of the base) and the lid
+ * that closes over the neck down to the base's rim; opening lifts the lid off.
+ */
+function shoulderAssembly(result: DielineResult, p: number, board: number): AssemblyPiece[] {
+    const none = new Quaternion();
+    const base = extractPart(result, 'base');
+    const basePos = centred(base, none, board);
+    const baseTop = basePos[1] + foldedBounds(base.panels, 1).max.y;
+    const pieces: AssemblyPiece[] = [{ key: 'base', result: base, fold: 1, orientation: none, position: basePos }];
+    if (result.parts?.includes('liner')) {
+        const liner = extractPart(result, 'liner');
+        pieces.push({ key: 'liner', result: liner, fold: 1, orientation: none, position: centred(liner, none, board + 0.3) });
+    }
+
+    // The neck band folds into a tube along world Z; stand it up.
+    const neck = extractPart(result, 'sleeve');
+    const upright = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), Math.PI / 2);
+    const neckPos = centred(neck, upright, baseTop);
+    const neckTop = neckPos[1] + foldedBounds(neck.panels, 1, upright).max.y;
+    pieces.push({ key: 'sleeve', result: neck, fold: 1, orientation: upright, position: neckPos });
+
+    const lid = extractPart(result, 'lid');
+    const flip = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), Math.PI);
+    const lidBox = foldedBounds(lid.panels, 1, flip);
+    const c = lidBox.getCenter(new Vector3());
+    const lift = (1 - p) * (lidBox.max.y - lidBox.min.y + LID_LIFT_EXTRA);
+    pieces.push({ key: 'lid', result: lid, fold: 1, orientation: flip, position: [-c.x, neckTop - lidBox.max.y + lift, -c.z] });
+    return pieces;
+}
+
+/**
+ * Book box: the cover's back board lies under the tray, the spine stands at one end and the
+ * front cover closes over the top. Opening swings only the front cover about the spine.
+ */
+function bookAssembly(result: DielineResult, p: number, board: number): AssemblyPiece[] {
+    const none = new Quaternion();
+    const base = extractPart(result, 'base');
+    // The tray stands on the back board (board thick), so its outer bottom is at y = board.
+    const basePos = centred(base, none, 2 * board);
+    const pieces: AssemblyPiece[] = [{ key: 'base', result: base, fold: 1, orientation: none, position: basePos }];
+    if (result.parts?.includes('liner')) {
+        const liner = extractPart(result, 'liner');
+        pieces.push({ key: 'liner', result: liner, fold: 1, orientation: none, position: centred(liner, none, 2 * board + 0.3) });
+    }
+
+    const cover = extractPart(result, 'lid');
+    // Closed: front cover at 90° to the spine (flat over the tray); open: swung past upright.
+    const frontAngle = 90 - (1 - p) * BOOK_OPEN_DEG;
+    const panels = cover.panels.map((panel) => (panel.id === 'lid-front' ? { ...panel, foldAngle: frontAngle } : panel));
+    const back = panels.find((panel) => panel.id === 'lid-back');
+    const centre = new Vector3();
+    if (back) {
+        for (const q of back.polygon) centre.add(toWorld(q));
+        centre.divideScalar(back.polygon.length);
+    }
+    // The back board's inner face (local y = 0) sits at y = board, centred under the tray.
+    pieces.push({ key: 'lid', result: { ...cover, panels }, fold: 1, orientation: none, position: [-centre.x, board, -centre.z] });
     return pieces;
 }

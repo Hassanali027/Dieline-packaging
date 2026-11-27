@@ -15,7 +15,7 @@ describe('parseUploadedSvg', () => {
         expect(() => parseUploadedSvg('<!DOCTYPE svg [<!ENTITY x "x">]><svg/>')).toThrow();
         const result = parseUploadedSvg('<svg width="960px" height="480px" viewBox="0 0 960 480"><rect x="1" y="1" width="20" height="10"/></svg>');
         expect(result.warnings.join(' ')).toContain('confirm the physical scale');
-        expect(result.panels[0].polygon[2].x).toBeCloseTo(20 * 25.4 / 96);
+        expect(result.panels[0].polygon[2].x).toBeCloseTo((20 * 25.4) / 96);
     });
 
     it('splits a closed outline at a crease and links the panels for folding', () => {

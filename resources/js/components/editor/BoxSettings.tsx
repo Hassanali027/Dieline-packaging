@@ -1,5 +1,5 @@
 import { fromMm, generateDieline, isStyleSupported, round, toMm } from '@/lib/dieline';
-import { parseUploadedDielineFile } from '@/lib/dieline/upload';
+import { parseUploadedDielineFile, scaleUploadedDieline } from '@/lib/dieline/upload';
 import { MATERIAL_COLORS, materialOptions, useMaterialsVersion } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { useEditorStore } from '@/store/useEditorStore';
@@ -116,6 +116,89 @@ function MiniDieline({ result, active }: { result: DielineResult; active: boolea
                 className={active ? 'stroke-violet-600' : 'stroke-slate-500'}
             />
         </svg>
+    );
+}
+
+/**
+ * Size of an uploaded dieline and the unit it was read in, with the parser's warnings. When the
+ * unit was a guess (pixels, or no unit at all) the customer types the real width and the whole
+ * drawing is rescaled (plan: "units se asli size; user ek dimension confirm kare").
+ */
+function UploadedSize() {
+    const source = useEditorStore((s) => s.design.source);
+    const setSource = useEditorStore((s) => s.setSource);
+    const [draft, setDraft] = useState('');
+    if (source.kind !== 'uploaded-dieline' || !source.widthMm || !source.heightMm) return null;
+    const width = source.widthMm;
+    const height = source.heightMm;
+
+    // Once the customer has checked the size, the "check the size" warnings are done with.
+    const sizeSettled = () => (source.warnings ?? []).filter((w) => !w.includes('Check the size below'));
+
+    const confirm = (realWidth: number) => {
+        if (!(realWidth > 0)) return;
+        setSource({ ...scaleUploadedDieline(source, realWidth / width), scaleConfirmed: true, warnings: sizeSettled() });
+        setDraft('');
+    };
+
+    return (
+        <div
+            className={cn(
+                'mt-2.5 rounded-2xl border p-3 text-xs',
+                source.scaleConfirmed ? 'border-slate-200 bg-slate-50/70' : 'border-amber-300 bg-amber-50',
+            )}
+        >
+            <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-800">Size</span>
+                <span className="text-slate-600 tabular-nums">
+                    {round(width, 1)} × {round(height, 1)} mm
+                </span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+                Read in {source.unit ?? 'mm'} · {source.panels.length} panel{source.panels.length === 1 ? '' : 's'}
+                {source.foldMapped ? ' · folds mapped' : ''}
+            </p>
+            {(source.warnings ?? []).map((w) => (
+                <p key={w} className="mt-1.5 text-[11px] text-amber-800">
+                    {w}
+                </p>
+            ))}
+            <form
+                className="mt-2 flex items-center gap-1.5"
+                onSubmit={(e) => {
+                    e.preventDefault();
+                    confirm(Number(draft));
+                }}
+            >
+                <input
+                    type="number"
+                    min={1}
+                    step="0.1"
+                    inputMode="decimal"
+                    aria-label="Real width in mm"
+                    placeholder={`Real width (${round(width, 1)} mm)`}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs tabular-nums"
+                />
+                <button
+                    type="submit"
+                    disabled={!(Number(draft) > 0)}
+                    className="h-8 shrink-0 rounded-lg bg-slate-900 px-2.5 text-[11px] font-semibold text-white disabled:opacity-40"
+                >
+                    Rescale
+                </button>
+                {!source.scaleConfirmed && (
+                    <button
+                        type="button"
+                        onClick={() => setSource({ ...source, scaleConfirmed: true, warnings: sizeSettled() })}
+                        className="h-8 shrink-0 rounded-lg border border-slate-300 bg-white px-2.5 text-[11px] font-semibold text-slate-700"
+                    >
+                        Size is right
+                    </button>
+                )}
+            </form>
+        </div>
     );
 }
 
@@ -238,6 +321,7 @@ export default function BoxSettings({ products, params, errors, onPickProduct }:
                     Upload custom dieline
                 </button>
                 {dielineError && <p className="mt-2 rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs text-rose-700">{dielineError}</p>}
+                {source.kind === 'uploaded-dieline' && <UploadedSize />}
                 {source.kind === 'uploaded-dieline' && (
                     <div className="mt-2.5 rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
                         <div className="flex items-center justify-between text-xs">

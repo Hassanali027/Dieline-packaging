@@ -93,7 +93,9 @@ export function dielineToSvg(result: DielineResult, options: SvgExportOptions = 
 
     const layers: string[] = [];
     if (options.artworkDataUrl?.startsWith('data:image/png;base64,')) {
-        layers.push(layer('Artwork', `    <image x="0" y="0" width="${n(W)}" height="${n(H)}" href="${options.artworkDataUrl}" preserveAspectRatio="none"/>`));
+        layers.push(
+            layer('Artwork', `    <image x="0" y="0" width="${n(W)}" height="${n(H)}" href="${options.artworkDataUrl}" preserveAspectRatio="none"/>`),
+        );
     }
     if (show.bleed) layers.push(pathLayer('bleed', [result.bleedPath]));
     if (show.safe) layers.push(pathLayer('safe', [result.safePath]));

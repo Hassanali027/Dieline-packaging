@@ -9,7 +9,7 @@ import type { BoxStyle, Design, DielineResult } from '@/types/design';
 import { ContactShadows, OrbitControls } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
-import { CanvasTexture, PMREMGenerator, RepeatWrapping, SRGBColorSpace, type Texture, type Vector3 } from 'three';
+import { Box3, CanvasTexture, PMREMGenerator, RepeatWrapping, SRGBColorSpace, Vector3 as ThreeVector3, type Texture } from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import FoldedBox from './FoldedBox';
 
@@ -38,25 +38,43 @@ const PRESET_DIRECTIONS: Record<CameraPreset, [number, number, number]> = {
     bottom: [0, -1, 0.0001],
 };
 
-function CameraRig({ preset, size }: { preset: CameraPreset; size: NonNullable<Props['size']> }) {
+/**
+ * Frames the box from a preset direction. `bounds` covers the box both closed and fully open
+ * (Dev 1): a drawer sliding out or a book cover swinging up stays in view.
+ */
+function CameraRig({ preset, bounds }: { preset: CameraPreset; bounds: Box3 }) {
     const camera = useThree((s) => s.camera);
-    const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null;
-    const { length, width, depth } = size;
+    const controls = useThree((s) => s.controls) as unknown as { target: ThreeVector3; update: () => void } | null;
 
     useEffect(() => {
         const [dx, dy, dz] = PRESET_DIRECTIONS[preset];
         const len = Math.hypot(dx, dy, dz);
-        const distance = Math.max(length, width, depth) * 2.4;
-        const target: [number, number, number] = [0, depth / 2, 0];
+        const centre = bounds.getCenter(new ThreeVector3());
+        const size = bounds.getSize(new ThreeVector3());
+        // Same framing as before for a plain box (2.4 × its largest side), more room for open parts.
+        const distance = Math.max(size.x, size.y, size.z, 1) * 2.4;
+        const target: [number, number, number] = [centre.x, centre.y, centre.z];
         camera.position.set(target[0] + (dx / len) * distance, target[1] + (dy / len) * distance, target[2] + (dz / len) * distance);
         camera.lookAt(...target);
         if (controls) {
             controls.target.set(...target);
             controls.update();
         }
-    }, [preset, length, width, depth, camera, controls]);
+    }, [preset, bounds, camera, controls]);
 
     return null;
+}
+
+/** Everything the assembly ever occupies (closed and fully open), in world mm. */
+function assemblyBounds(style: BoxStyle | undefined, result: DielineResult, thickness: number): Box3 {
+    const box = new Box3();
+    for (const progress of [0, 1]) {
+        for (const piece of buildAssembly(style, result, progress, thickness)) {
+            const local = foldedBounds(piece.result.panels, piece.fold, piece.orientation).translate(new ThreeVector3(...piece.position));
+            box.union(local);
+        }
+    }
+    return box;
 }
 
 /**
@@ -170,6 +188,7 @@ export default function Preview3D({
     const finishProps = useMemo(() => resolveFinishProps(material, finish), [material, finish]);
     const bumpMap = useMemo(() => getMaterialBumpMap(material), [material]);
     const extent = boxSize ? Math.max(boxSize.length, boxSize.width, boxSize.depth) : 200;
+    const cameraBounds = useMemo(() => (result && boxSize ? assemblyBounds(style, result, boxSize.thickness) : null), [result, style, boxSize]);
 
     return (
         <div ref={containerRef} className="relative h-full w-full">
@@ -220,7 +239,7 @@ export default function Preview3D({
 
                 <ContactShadows position={[0, -0.5, 0]} scale={extent * 6} far={extent} blur={2.5} opacity={0.65} resolution={512} />
                 <OrbitControls makeDefault enableDamping minDistance={extent * 0.6} maxDistance={extent * 8} />
-                {boxSize && <CameraRig preset={cameraPreset} size={boxSize} />}
+                {cameraBounds && <CameraRig preset={cameraPreset} bounds={cameraBounds} />}
             </Canvas>
         </div>
     );

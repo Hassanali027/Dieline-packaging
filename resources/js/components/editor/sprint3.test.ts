@@ -73,7 +73,11 @@ describe('Sprint 3 editor helpers', () => {
         expect(parsed.lines).toHaveLength(2);
         expect(parsed.lines[0].tag).toBe('cut');
         expect(parsed.lines[1].tag).toBe('fold');
-        expect(parsed.foldMapped).toBe(true);
+        // One open cut line is no outline: no panels to fold yet, and the customer is told why.
+        expect(parsed.foldMapped).toBe(false);
+        expect(parsed.warnings.join(' ')).toContain('No closed cut outline');
+        // No $INSUNITS header: read as mm, flagged for confirmation.
+        expect(parsed.unit).toBe('assumed mm');
 
         const store = useEditorStore.getState();
         store.setSource({ kind: 'uploaded-dieline', ...parsed });

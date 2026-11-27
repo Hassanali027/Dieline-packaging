@@ -1,10 +1,8 @@
 import { Box3, Matrix4, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import type { BoxParams, DielineResult } from '../../types/design';
+import type { BoxParams } from '../../types/design';
 import { generateDieline, rigidSizes } from '../dieline';
-import { rect } from '../dieline/geometry';
-import { buildDielineResult } from '../dieline/result';
-import { BOOK_OPEN_DEG, buildAssembly, LID_LIFT_EXTRA, MAGNETIC_OPEN_DEG, type AssemblyPiece } from './assembly';
+import { buildAssembly, LID_LIFT_EXTRA, MAGNETIC_OPEN_DEG, type AssemblyPiece } from './assembly';
 import { foldedBounds } from './foldTree';
 
 function worldBounds(piece: AssemblyPiece): Box3 {
@@ -65,30 +63,71 @@ describe('3D assembly', () => {
         expect(worldBounds(open[2]).min.y - lid.min.y).toBeCloseTo(s.lid.height + LID_LIFT_EXTRA, 3);
     });
 
-    it('slides the rigid drawer out of the sleeve along +Z when opened', () => {
-        const mockDrawerResult: DielineResult = buildDielineResult(
-            [
-                { id: 'sleeve-floor', name: 'Sleeve', polygon: rect(0, 0, 200, 150), foldAngle: 0, side: 'outside', part: 'sleeve' },
-                { id: 'drawer-floor', name: 'Drawer', polygon: rect(230, 0, 190, 145), foldAngle: 0, side: 'outside', part: 'drawer' },
-            ],
-            { parts: ['sleeve', 'drawer'] },
-        );
-        const closed = buildAssembly('rigid-drawer', mockDrawerResult, 1, 2);
-        const open = buildAssembly('rigid-drawer', mockDrawerResult, 0, 2);
-
-        expect(closed.map((p) => p.key)).toEqual(['sleeve', 'drawer']);
-        expect(open[0].position[2]).toBeCloseTo(closed[0].position[2], 3);
-        expect(open[1].position[2]).toBeGreaterThan(closed[1].position[2] + 50);
+    it('slides the drawer and its liner out of the sleeve along the open ends (X)', () => {
+        const result = generateDieline({ ...rigid, style: 'rigid-drawer' });
+        const closed = buildAssembly('rigid-drawer', result, 1, 2);
+        const open = buildAssembly('rigid-drawer', result, 0, 2);
+        expect(closed.map((p) => p.key)).toEqual(['sleeve', 'drawer', 'liner']);
+        // The sleeve stays put; drawer and liner move together, along X only.
+        expect(open[0].position).toEqual(closed[0].position);
+        expect(open[1].position[0] - closed[1].position[0]).toBeGreaterThan(100);
+        expect(open[2].position[0] - closed[2].position[0]).toBeCloseTo(open[1].position[0] - closed[1].position[0], 6);
+        expect(open[1].position[2]).toBeCloseTo(closed[1].position[2], 6);
+        // Closed, the drawer is inside the sleeve (sides, floor and top).
+        const sleeve = worldBounds(closed[0]);
+        const drawer = worldBounds(closed[1]);
+        expect(drawer.min.y).toBeGreaterThan(sleeve.min.y);
+        expect(drawer.max.y).toBeLessThan(sleeve.max.y);
+        expect(drawer.min.z).toBeGreaterThan(sleeve.min.z);
+        expect(drawer.max.z).toBeLessThan(sleeve.max.z);
     });
 
-    it('animates hinged lids for rigid-book and rigid-magnetic styles', () => {
-        const result = generateDieline(rigid);
-        const bookOpen = buildAssembly('rigid-book', result, 0, 2);
-        const bookClosed = buildAssembly('rigid-book', result, 1, 2);
-        expect(bookClosed.find((p) => p.key === 'lid')?.hingeRotation?.angle).toBeCloseTo(0, 5);
-        expect(bookOpen.find((p) => p.key === 'lid')?.hingeRotation?.angle).toBeCloseTo((BOOK_OPEN_DEG * Math.PI) / 180, 4);
+    it('stands the shoulder neck on the base and closes the lid over it', () => {
+        const result = generateDieline({ ...rigid, style: 'rigid-shoulder', rigid: { ...rigid.rigid!, shoulderHeight: 18 } });
+        const pieces = buildAssembly('rigid-shoulder', result, 1, 2);
+        expect(pieces.map((p) => p.key)).toEqual(['base', 'liner', 'sleeve', 'lid']);
+        const base = worldBounds(pieces[0]);
+        const neck = worldBounds(pieces[2]);
+        const lid = worldBounds(pieces[3]);
+        expect(neck.min.y).toBeCloseTo(base.max.y, 1);
+        expect(neck.max.y - neck.min.y).toBeCloseTo(18, 1);
+        // The neck fits inside the base walls; the lid covers it.
+        expect(neck.min.x).toBeGreaterThan(base.min.x);
+        expect(neck.max.x).toBeLessThan(base.max.x);
+        // Bounds are board surfaces: the lid's inner top rests on the neck's top edge.
+        expect(lid.max.y).toBeCloseTo(neck.max.y, 1);
+        expect(lid.min.x).toBeLessThan(neck.min.x);
+        // Opening lifts the lid.
+        expect(worldBounds(buildAssembly('rigid-shoulder', result, 0, 2)[3]).min.y).toBeGreaterThan(lid.min.y + 18);
+    });
 
+    it('wraps the book cover under, beside and over the tray, and opens only the front cover', () => {
+        const result = generateDieline({ ...rigid, style: 'rigid-book' });
+        const closed = buildAssembly('rigid-book', result, 1, 2);
+        const open = buildAssembly('rigid-book', result, 0, 2);
+        expect(closed.map((p) => p.key)).toEqual(['base', 'liner', 'lid']);
+        const tray = worldBounds(closed[0]);
+        const cover = worldBounds(closed[2]);
+        // Bounds are board surfaces: the back board (0..2 mm) lies on the ground, its inner face at
+        // 2 mm; the tray's outer bottom stands on it (its floor board 2..4 mm).
+        expect(cover.min.y).toBeCloseTo(2, 1);
+        expect(tray.min.y).toBeCloseTo(4, 1);
+        expect(cover.max.y).toBeGreaterThan(tray.max.y);
+        expect(cover.max.y - tray.max.y).toBeLessThan(5);
+        // The tray sits within the cover's footprint.
+        expect(tray.min.x).toBeGreaterThan(cover.min.x - 0.01);
+        expect(tray.max.x).toBeLessThan(cover.max.x + 0.01);
+        // Open: the tray stays, the front cover swings up well above the box.
+        expect(open[0].position).toEqual(closed[0].position);
+        expect(worldBounds(open[2]).max.y).toBeGreaterThan(cover.max.y + 100);
+        expect(open[2].result.panels.find((p) => p.id === 'lid-spine')?.foldAngle).toBe(90);
+    });
+
+    it('swings the magnetic lid open on its hinge', () => {
+        const result = generateDieline(rigid);
+        const magClosed = buildAssembly('rigid-magnetic', result, 1, 2);
         const magOpen = buildAssembly('rigid-magnetic', result, 0, 2);
+        expect(magClosed.find((p) => p.key === 'lid')?.hingeRotation?.angle).toBeCloseTo(0, 5);
         expect(Math.abs(magOpen.find((p) => p.key === 'lid')?.hingeRotation?.angle ?? 0)).toBeCloseTo((MAGNETIC_OPEN_DEG * Math.PI) / 180, 4);
     });
 });

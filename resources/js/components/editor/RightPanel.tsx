@@ -158,7 +158,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
 
             {/* Open / close */}
             <Card
-                title={rigid ? 'Lid' : 'Fold'}
+                title={params?.style === 'rigid-drawer' ? 'Drawer' : rigid ? 'Lid' : 'Fold'}
                 icon={<Box className="size-3.5" />}
                 aside={<span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-bold text-violet-700 tabular-nums">{percent}%</span>}
             >

@@ -30,6 +30,36 @@ const STYLES: BoxParams[] = [
         construction: 'rigid',
         rigid: { boardThickness: 2, turnIn: 18 },
     },
+    {
+        style: 'rigid-drawer',
+        length: 200,
+        width: 150,
+        depth: 60,
+        thickness: 2,
+        unit: 'mm',
+        construction: 'rigid',
+        rigid: { boardThickness: 2, turnIn: 18, lidDepth: 30, shoulderHeight: 18 },
+    },
+    {
+        style: 'rigid-shoulder',
+        length: 200,
+        width: 150,
+        depth: 60,
+        thickness: 2,
+        unit: 'mm',
+        construction: 'rigid',
+        rigid: { boardThickness: 2, turnIn: 18, lidDepth: 30, shoulderHeight: 18 },
+    },
+    {
+        style: 'rigid-book',
+        length: 200,
+        width: 150,
+        depth: 60,
+        thickness: 2,
+        unit: 'mm',
+        construction: 'rigid',
+        rigid: { boardThickness: 2, turnIn: 18, lidDepth: 30, shoulderHeight: 18 },
+    },
 ];
 
 /** Every printed sheet of a style (rigid boxes fold each part on its own). */

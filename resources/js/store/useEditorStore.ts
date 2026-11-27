@@ -1,3 +1,4 @@
+import { panelsFromLineTags } from '@/lib/dieline/uploadedSvg';
 import type { BoxParams, BoxSource, CanvasObject, Design, DesignPartKey, Panel } from '@/types/design';
 import { temporal } from 'zundo';
 import { create } from 'zustand';
@@ -179,13 +180,16 @@ export const useEditorStore = create<EditorState>()(
                         return state;
                     }
                     const lines = state.design.source.lines.map((l) => (l.id === lineId ? { ...l, tag } : l));
+                    // Re-tagging changes where the panels are: rebuild them (the fold mapping starts over).
+                    const panels = panelsFromLineTags(lines);
                     return {
                         design: {
                             ...state.design,
                             source: {
                                 ...state.design.source,
                                 lines,
-                                foldMapped: lines.some((l) => l.tag === 'fold'),
+                                ...(panels.length ? { panels } : {}),
+                                foldMapped: panels.some((p) => p.parentId),
                             },
                         },
                     };

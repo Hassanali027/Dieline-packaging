@@ -62,7 +62,7 @@ export function rigidSizes(params: BoxParams): RigidSizes {
 }
 
 /** Wrap for one chipboard tray of outer size length × width × height. */
-export function wrapPanels(part: 'lid' | 'base', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
+export function wrapPanels(part: 'lid' | 'base' | 'drawer', length: number, width: number, height: number, turnIn: number, board: number): Panel[] {
     const Lo = length;
     const Wo = width;
     const H = height;
@@ -72,7 +72,7 @@ export function wrapPanels(part: 'lid' | 'base', length: number, width: number, 
     const earTaper = ear * 0.4;
     const id = (name: string) => `${part}-${name}`;
     const face = part === 'lid' ? 'top' : 'bottom';
-    const label = (name: string) => `${part === 'lid' ? 'Lid' : 'Base'} ${name}`;
+    const label = (name: string) => `${part === 'lid' ? 'Lid' : part === 'drawer' ? 'Drawer' : 'Base'} ${name}`;
 
     const walls: [string, string, Panel['polygon'], { a: ReturnType<typeof pt>; b: ReturnType<typeof pt> }][] = [
         ['back', 'Back', rect(0, -H, Lo, H), hinge(pt(0, 0), pt(Lo, 0))],

@@ -4,6 +4,7 @@ import { buildDielineResult } from './result';
 import { generateRigidMagnetic } from './styles/magnetic';
 import { generateMailer } from './styles/mailer';
 import { generateRigidLidBase } from './styles/rigid';
+import { generateRigidBook, generateRigidDrawer, generateRigidShoulder } from './styles/rigid-extra';
 import { generateBurger, generateSleeve, generateTray } from './styles/trays';
 import { generateReverseTuck, generateStraightTuck } from './styles/tuck';
 
@@ -11,6 +12,7 @@ export * from './geometry';
 export { BLEED_MM, buildDielineResult, SAFE_MM } from './result';
 export { magneticSizes, type MagneticSizes } from './styles/magnetic';
 export { rigidSizes, WRAP_MM, type RigidSizes } from './styles/rigid';
+export * from './uploadedSvg';
 
 type Generator = (params: BoxParams) => DielineResult;
 
@@ -24,6 +26,9 @@ const GENERATORS: Partial<Record<BoxStyle, Generator>> = {
     sleeve: generateSleeve,
     'rigid-lid-base': generateRigidLidBase,
     'rigid-magnetic': generateRigidMagnetic,
+    'rigid-drawer': generateRigidDrawer,
+    'rigid-shoulder': generateRigidShoulder,
+    'rigid-book': generateRigidBook,
 };
 
 export const SUPPORTED_STYLES = Object.keys(GENERATORS) as BoxStyle[];

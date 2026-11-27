@@ -7,11 +7,7 @@ import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
 import { surfaceObjects, useEditorStore, type CameraPreset } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
-<<<<<<< HEAD
-import { Box, Download, Eye, Layers, MousePointerClick, Ruler, Scissors, Sparkles } from 'lucide-react';
-=======
-import { AlertTriangle, Box, Download, Layers, MousePointerClick, Ruler, Scissors } from 'lucide-react';
->>>>>>> Farukh
+import { AlertTriangle, Box, Download, Eye, Layers, MousePointerClick, Ruler, Scissors, Sparkles } from 'lucide-react';
 import { lazy, Suspense, type ReactNode } from 'react';
 import { LOW_PRINT_DPI, lowDpiImages } from './objects';
 
@@ -305,9 +301,7 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                         </span>
                     }
                 >
-                    <p className="mb-2 text-xs text-slate-600">
-                        Images below 300 DPI may print blurry. Click an item to select and resize it.
-                    </p>
+                    <p className="mb-2 text-xs text-slate-600">Images below 300 DPI may print blurry. Click an item to select and resize it.</p>
                     <ul className="flex flex-col gap-1.5">
                         {dpiWarnings.map(({ object, dpi }, idx) => (
                             <li key={object.id}>
@@ -316,7 +310,9 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                                     onClick={() => setSelectedObjectIds([object.id])}
                                     className={cn(
                                         'flex w-full items-center justify-between rounded-xl border px-2.5 py-1.5 text-left text-xs transition hover:border-slate-300',
-                                        dpi < LOW_PRINT_DPI ? 'border-rose-200 bg-rose-50/60 text-rose-800' : 'border-amber-200 bg-amber-50/60 text-amber-800',
+                                        dpi < LOW_PRINT_DPI
+                                            ? 'border-rose-200 bg-rose-50/60 text-rose-800'
+                                            : 'border-amber-200 bg-amber-50/60 text-amber-800',
                                     )}
                                 >
                                     <span className="truncate font-medium">{String(object.props.name || `Image ${idx + 1}`)}</span>

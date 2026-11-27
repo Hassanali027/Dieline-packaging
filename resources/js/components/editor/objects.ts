@@ -149,7 +149,12 @@ export function applyToFabric(fo: BoundObject, obj: CanvasObject): boolean {
     const key = propsKey(obj);
     if (fo.propsKey === key) return true;
     // An image/code with a new source, or a shape with a new kind, is simpler to rebuild.
-    if ((obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode') && (fo as FabricImage).getSrc?.() && !(fo as FabricImage).getSrc().endsWith(str(obj.props.src, ''))) return false;
+    if (
+        (obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode') &&
+        (fo as FabricImage).getSrc?.() &&
+        !(fo as FabricImage).getSrc().endsWith(str(obj.props.src, ''))
+    )
+        return false;
     if (obj.type === 'shape' && fo.shapeKind !== str(obj.props.shape, 'rect')) return false;
     if (obj.type === 'group' && fo.childrenKey !== JSON.stringify(groupChildren(obj))) return false;
 
@@ -207,7 +212,8 @@ export function objectSize(obj: CanvasObject): { width: number; height: number }
 
 function baseSize(obj: CanvasObject): { width: number; height: number } {
     const p = obj.props;
-    if (obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode') return { width: num(p.naturalWidth, 100), height: num(p.naturalHeight, 100) };
+    if (obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode')
+        return { width: num(p.naturalWidth, 100), height: num(p.naturalHeight, 100) };
     if (obj.type === 'group') return { width: num(p.width, 40), height: num(p.height, 40) };
     if (obj.type === 'text') return { width: num(p.width, 80), height: num(p.height, num(p.fontSize, 4) * 1.2) };
     if (str(p.shape, '') === 'line') return { width: num(p.width, 40), height: num(p.strokeWidth, 1) };

@@ -41,11 +41,7 @@ export function draftHasWork(draft: Draft): boolean {
     const d = draft.design;
     const partWork = Object.values(d.parts ?? {}).some((p) => (p?.outside?.length ?? 0) > 0 || (p?.inside?.length ?? 0) > 0);
     return (
-        d.outside.length > 0 ||
-        d.inside.length > 0 ||
-        partWork ||
-        d.source.kind === 'uploaded-dieline' ||
-        Object.keys(d.faceColors ?? {}).length > 0
+        d.outside.length > 0 || d.inside.length > 0 || partWork || d.source.kind === 'uploaded-dieline' || Object.keys(d.faceColors ?? {}).length > 0
     );
 }
 

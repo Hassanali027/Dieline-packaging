@@ -233,6 +233,8 @@ export default function DielineCanvas({
             selection: true,
             fireMiddleClick: true,
             stopContextMenu: true,
+            // Pixels of slack around thin strokes for objects that hit-test per pixel (tagged dieline lines).
+            targetFindTolerance: 6,
         });
         canvasRef.current = canvas;
         const boundObjects = fabricObjects.current;
@@ -471,7 +473,9 @@ export default function DielineCanvas({
             ...(!hasInteractiveUploadedLines
                 ? [
                       new Path(path(result.cutPath), { ...lineStyle, stroke: COLORS.cut, strokeWidth: 1.25 }),
-                      ...result.creasePaths.map((d) => new Path(path(d), { ...lineStyle, stroke: COLORS.crease, strokeWidth: 1, strokeDashArray: [5, 4] })),
+                      ...result.creasePaths.map(
+                          (d) => new Path(path(d), { ...lineStyle, stroke: COLORS.crease, strokeWidth: 1, strokeDashArray: [5, 4] }),
+                      ),
                   ]
                 : []),
         ];
@@ -483,6 +487,9 @@ export default function DielineCanvas({
                           ...locked,
                           fill: '',
                           evented: lineTaggingMode,
+                          // Hit the stroke itself, not the bounding box: otherwise a click anywhere inside
+                          // the outer cut outline (and on the fold lines within it) toggled the outline.
+                          perPixelTargetFind: true,
                           hoverCursor: lineTaggingMode ? 'pointer' : 'default',
                           stroke: l.tag === 'cut' ? COLORS.cut : COLORS.crease,
                           strokeWidth: lineTaggingMode ? 2.2 : 1.25,

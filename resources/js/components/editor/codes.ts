@@ -121,10 +121,7 @@ export function validateBarcodeInput(format: BarcodeFormat, rawValue: string): s
     }
 }
 
-export async function generateQrDataUrl(
-    value: string,
-    opts?: { color?: string; background?: string; ecc?: QrErrorCorrection },
-): Promise<string> {
+export async function generateQrDataUrl(value: string, opts?: { color?: string; background?: string; ecc?: QrErrorCorrection }): Promise<string> {
     return QRCode.toDataURL(value.trim(), {
         errorCorrectionLevel: opts?.ecc ?? 'M',
         margin: 2,

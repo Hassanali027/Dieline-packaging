@@ -1,6 +1,7 @@
 import type { DielineLineTag, Panel, Pt } from '@/types/design';
 import DxfParser from 'dxf-parser';
 import { bounds, rect } from './geometry';
+import { applyMatrix, ellipsePoints, IDENTITY, multiply, parseTransform, svgPathToPolylines, type Matrix, type Polyline } from './svgPath';
 
 export type ParsedUploadedDieline = {
     fileId: string;
@@ -30,36 +31,6 @@ function parsePointsAttr(raw: string | null): Pt[] {
     return pts;
 }
 
-function extractPathPoints(d: string): Pt[] {
-    const nums = d
-        .replace(/[A-Za-z]/g, ' ')
-        .trim()
-        .split(/[\s,]+/)
-        .map(Number)
-        .filter((n) => Number.isFinite(n));
-    const pts: Pt[] = [];
-    for (let i = 0; i + 1 < nums.length; i += 2) {
-        pts.push({ x: nums[i], y: nums[i + 1] });
-    }
-    return pts;
-}
-
-function shiftPath(d: string, dx: number, dy: number): string {
-    // Only shift simple M/L/H/V/C/Q/Z paths when needed; for SVG we normalize via viewBox or numeric offset.
-    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return d;
-    let axis = 0;
-    return d.replace(/([MLHVCSQTAZmlhvcsqtaz])|(-?\d*\.?\d+(?:e[+-]?\d+)?)/g, (token, cmd, numStr) => {
-        if (cmd) {
-            axis = 0;
-            return cmd;
-        }
-        const v = Number(numStr);
-        const shifted = axis % 2 === 0 ? v + dx : v + dy;
-        axis += 1;
-        return String(Math.round(shifted * 1000) / 1000);
-    });
-}
-
 function isLikelyFoldStyle(el: Element): boolean {
     const dash = el.getAttribute('stroke-dasharray') ?? '';
     const stroke = (el.getAttribute('stroke') ?? '').toLowerCase();
@@ -77,7 +48,63 @@ function isLikelyFoldStyle(el: Element): boolean {
     );
 }
 
-/** Parses an uploaded SVG dieline into normalized `DielineLineTag[]` (mm) with a fallback bounding panel. */
+/** Elements that never draw by themselves (clip paths, symbols, …): their shapes are not dieline lines. */
+const NON_RENDERED = 'defs, clipPath, mask, symbol, pattern, marker';
+
+const attr = (el: Element, name: string): number => Number(el.getAttribute(name) ?? 0) || 0;
+
+/** The element's shapes in its own coordinates (before transforms). */
+function elementPolylines(el: Element): Polyline[] {
+    switch (el.tagName.toLowerCase()) {
+        case 'path':
+            return svgPathToPolylines(el.getAttribute('d') ?? '');
+        case 'line':
+            return [
+                {
+                    pts: [
+                        { x: attr(el, 'x1'), y: attr(el, 'y1') },
+                        { x: attr(el, 'x2'), y: attr(el, 'y2') },
+                    ],
+                    closed: false,
+                },
+            ];
+        case 'rect': {
+            const w = attr(el, 'width');
+            const h = attr(el, 'height');
+            return w > 0 && h > 0 ? [{ pts: rect(attr(el, 'x'), attr(el, 'y'), w, h), closed: true }] : [];
+        }
+        case 'circle': {
+            const r = attr(el, 'r');
+            return r > 0 ? [{ pts: ellipsePoints(attr(el, 'cx'), attr(el, 'cy'), r, r), closed: true }] : [];
+        }
+        case 'ellipse': {
+            const rx = attr(el, 'rx');
+            const ry = attr(el, 'ry');
+            return rx > 0 && ry > 0 ? [{ pts: ellipsePoints(attr(el, 'cx'), attr(el, 'cy'), rx, ry), closed: true }] : [];
+        }
+        case 'polygon':
+        case 'polyline': {
+            const pts = parsePointsAttr(el.getAttribute('points'));
+            return pts.length >= 2 ? [{ pts, closed: el.tagName.toLowerCase() === 'polygon' }] : [];
+        }
+        default:
+            return [];
+    }
+}
+
+/** The element's own transform combined with every ancestor's (outermost first). */
+function elementMatrix(el: Element): Matrix {
+    const chain: Element[] = [];
+    for (let node: Element | null = el; node; node = node.parentElement) chain.unshift(node);
+    return chain.reduce((m, node) => multiply(m, parseTransform(node.getAttribute('transform'))), IDENTITY);
+}
+
+/**
+ * Parses an uploaded SVG dieline into `DielineLineTag[]` (moved so the drawing starts at 0,0)
+ * with a fallback bounding panel. All path commands, curves, arcs and group / element
+ * transforms are applied (see svgPath.ts), so the lines keep their real shape and position.
+ * SVG user units are taken as mm.
+ */
 export function parseSvgDieline(svgText: string, fileName: string): ParsedUploadedDieline {
     const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
     const parserError = doc.querySelector('parsererror');
@@ -85,44 +112,15 @@ export function parseSvgDieline(svgText: string, fileName: string): ParsedUpload
         throw new Error('Could not parse SVG file.');
     }
 
-    const rawLines: { path: string; tag: 'cut' | 'fold'; pts: Pt[] }[] = [];
-    const elements = doc.querySelectorAll('path, line, rect, polygon, polyline');
-
-    elements.forEach((el) => {
-        const tagName = el.tagName.toLowerCase();
-        const tag: 'cut' | 'fold' = isLikelyFoldStyle(el) ? 'fold' : 'cut';
-
-        if (tagName === 'path') {
-            const d = el.getAttribute('d')?.trim();
-            if (d) rawLines.push({ path: d, tag, pts: extractPathPoints(d) });
-        } else if (tagName === 'line') {
-            const x1 = Number(el.getAttribute('x1') ?? 0);
-            const y1 = Number(el.getAttribute('y1') ?? 0);
-            const x2 = Number(el.getAttribute('x2') ?? 0);
-            const y2 = Number(el.getAttribute('y2') ?? 0);
-            const pts = [
-                { x: x1, y: y1 },
-                { x: x2, y: y2 },
-            ];
-            rawLines.push({ path: pointsToPath(pts), tag, pts });
-        } else if (tagName === 'rect') {
-            const x = Number(el.getAttribute('x') ?? 0);
-            const y = Number(el.getAttribute('y') ?? 0);
-            const w = Number(el.getAttribute('width') ?? 0);
-            const h = Number(el.getAttribute('height') ?? 0);
-            if (w > 0 && h > 0) {
-                const pts = rect(x, y, w, h);
-                rawLines.push({ path: pointsToPath(pts, true), tag, pts });
-            }
-        } else if (tagName === 'polygon' || tagName === 'polyline') {
-            const pts = parsePointsAttr(el.getAttribute('points'));
-            if (pts.length >= 2) {
-                rawLines.push({ path: pointsToPath(pts, tagName === 'polygon'), tag, pts });
-            }
-        }
+    const rawLines: { tag: 'cut' | 'fold'; polylines: Polyline[] }[] = [];
+    doc.querySelectorAll('path, line, rect, circle, ellipse, polygon, polyline').forEach((el) => {
+        if (el.closest(NON_RENDERED)) return;
+        const m = elementMatrix(el);
+        const polylines = elementPolylines(el).map((l) => ({ ...l, pts: l.pts.map((pt) => applyMatrix(m, pt)) }));
+        if (polylines.length) rawLines.push({ tag: isLikelyFoldStyle(el) ? 'fold' : 'cut', polylines });
     });
 
-    const allPts = rawLines.flatMap((l) => l.pts);
+    const allPts = rawLines.flatMap((l) => l.polylines.flatMap((pl) => pl.pts));
     if (!rawLines.length || !allPts.length) {
         throw new Error('No vector paths or lines found in this SVG.');
     }
@@ -130,12 +128,11 @@ export function parseSvgDieline(svgText: string, fileName: string): ParsedUpload
     const b = bounds([allPts]);
     const width = Math.max(20, b.maxX - b.minX);
     const height = Math.max(20, b.maxY - b.minY);
-    const dx = -b.minX;
-    const dy = -b.minY;
+    const shift = (pt: Pt): Pt => ({ x: pt.x - b.minX, y: pt.y - b.minY });
 
     const lines: DielineLineTag[] = rawLines.map((l, idx) => ({
         id: `line-${idx + 1}`,
-        path: shiftPath(l.path, dx, dy),
+        path: l.polylines.map((pl) => pointsToPath(pl.pts.map(shift), pl.closed)).join(' '),
         tag: l.tag,
     }));
 
@@ -172,7 +169,11 @@ export function parseDxfDieline(dxfText: string, fileName: string): ParsedUpload
     }>) {
         const layer = (ent.layer ?? '').toLowerCase();
         const tag: 'cut' | 'fold' = layer.includes('fold') || layer.includes('crease') ? 'fold' : 'cut';
-        if ((ent.type === 'LINE' || ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') && Array.isArray(ent.vertices) && ent.vertices.length >= 2) {
+        if (
+            (ent.type === 'LINE' || ent.type === 'LWPOLYLINE' || ent.type === 'POLYLINE') &&
+            Array.isArray(ent.vertices) &&
+            ent.vertices.length >= 2
+        ) {
             // Flip Y because DXF Y points up while SVG/Fabric Y points down.
             const pts = ent.vertices.map((v) => ({ x: v.x, y: -v.y }));
             rawLines.push({ pts, closed: !!ent.shape, tag });

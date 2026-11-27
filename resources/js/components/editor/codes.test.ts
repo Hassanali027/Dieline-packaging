@@ -3,17 +3,7 @@ import { BARCODE_FORMATS, gs1CheckDigit, validateBarcodeInput, validateQrInput }
 
 describe('QR & Barcode validation', () => {
     it('supports all 9 barcode formats', () => {
-        expect(BARCODE_FORMATS.map((f) => f.id)).toEqual([
-            'CODE128',
-            'EAN13',
-            'EAN8',
-            'UPC',
-            'CODE39',
-            'ITF14',
-            'MSI',
-            'pharmacode',
-            'codabar',
-        ]);
+        expect(BARCODE_FORMATS.map((f) => f.id)).toEqual(['CODE128', 'EAN13', 'EAN8', 'UPC', 'CODE39', 'ITF14', 'MSI', 'pharmacode', 'codabar']);
     });
 
     it('validates QR input', () => {

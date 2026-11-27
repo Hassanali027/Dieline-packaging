@@ -5,10 +5,15 @@ import { downloadText } from '@/lib/export/download';
 import { dielineFileName, dielineToSvg } from '@/lib/export/svg';
 import { materialColor } from '@/lib/three/materials';
 import { cn } from '@/lib/utils';
-import { useEditorStore, type CameraPreset } from '@/store/useEditorStore';
+import { surfaceObjects, useEditorStore, type CameraPreset } from '@/store/useEditorStore';
 import type { BoxParams, DielineResult } from '@/types/design';
+<<<<<<< HEAD
 import { Box, Download, Eye, Layers, MousePointerClick, Ruler, Scissors, Sparkles } from 'lucide-react';
+=======
+import { AlertTriangle, Box, Download, Layers, MousePointerClick, Ruler, Scissors } from 'lucide-react';
+>>>>>>> Farukh
 import { lazy, Suspense, type ReactNode } from 'react';
+import { LOW_PRINT_DPI, lowDpiImages } from './objects';
 
 // Three.js is large; load the 3D view in its own chunk so the 2D editor paints first.
 const Preview3D = lazy(() => import('@/components/preview3d/Preview3D'));
@@ -73,6 +78,10 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
     const setFaceColor = useEditorStore((s) => s.setFaceColor);
     const selectedPanelId = useEditorStore((s) => s.selectedPanelId);
     const setSelectedPanelId = useEditorStore((s) => s.setSelectedPanelId);
+    const activePart = useEditorStore((s) => s.activePart);
+    const setSelectedObjectIds = useEditorStore((s) => s.setSelectedObjectIds);
+    const objects = useEditorStore((s) => surfaceObjects(s.design, activePart, activeSide));
+    const dpiWarnings = lowDpiImages(objects);
 
     const size = params
         ? {
@@ -281,7 +290,41 @@ export default function RightPanel({ result, sheetResult, params, textures }: Pr
                         <Legend color="#e11d48" label="Crease" dashed />
                         <Legend color="#38bdf8" label="Bleed" dashed />
                         <Legend color="#22c55e" label="Safe" dashed />
+                        {sheet.panels.some((p) => p.id.includes('turnin-')) && <Legend color="#d97706" label="Turn-in" dashed />}
                     </div>
+                </Card>
+            )}
+
+            {dpiWarnings.length > 0 && (
+                <Card
+                    title="Print quality"
+                    icon={<AlertTriangle className="size-3.5 text-amber-500" />}
+                    aside={
+                        <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 tabular-nums">
+                            {dpiWarnings.length} low DPI
+                        </span>
+                    }
+                >
+                    <p className="mb-2 text-xs text-slate-600">
+                        Images below 300 DPI may print blurry. Click an item to select and resize it.
+                    </p>
+                    <ul className="flex flex-col gap-1.5">
+                        {dpiWarnings.map(({ object, dpi }, idx) => (
+                            <li key={object.id}>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedObjectIds([object.id])}
+                                    className={cn(
+                                        'flex w-full items-center justify-between rounded-xl border px-2.5 py-1.5 text-left text-xs transition hover:border-slate-300',
+                                        dpi < LOW_PRINT_DPI ? 'border-rose-200 bg-rose-50/60 text-rose-800' : 'border-amber-200 bg-amber-50/60 text-amber-800',
+                                    )}
+                                >
+                                    <span className="truncate font-medium">{String(object.props.name || `Image ${idx + 1}`)}</span>
+                                    <span className="font-bold tabular-nums">{dpi} DPI</span>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
                 </Card>
             )}
 

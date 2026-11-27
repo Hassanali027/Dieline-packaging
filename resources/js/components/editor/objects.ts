@@ -107,7 +107,7 @@ export async function createFabricObject(obj: CanvasObject): Promise<BoundObject
                 strokeWidth: num(p.strokeWidth, 1),
             });
         else fo = new Rect({ ...base, width, height, rx: num(p.rx, 0), ry: num(p.rx, 0) });
-    } else if (obj.type === 'image') {
+    } else if (obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode') {
         const src = str(p.src, '');
         if (!src) return null;
         try {
@@ -148,8 +148,8 @@ export function propsKey(obj: CanvasObject): string {
 export function applyToFabric(fo: BoundObject, obj: CanvasObject): boolean {
     const key = propsKey(obj);
     if (fo.propsKey === key) return true;
-    // An image with a new source, or a shape with a new kind, is simpler to rebuild.
-    if (obj.type === 'image' && (fo as FabricImage).getSrc?.() && !(fo as FabricImage).getSrc().endsWith(str(obj.props.src, ''))) return false;
+    // An image/code with a new source, or a shape with a new kind, is simpler to rebuild.
+    if ((obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode') && (fo as FabricImage).getSrc?.() && !(fo as FabricImage).getSrc().endsWith(str(obj.props.src, ''))) return false;
     if (obj.type === 'shape' && fo.shapeKind !== str(obj.props.shape, 'rect')) return false;
     if (obj.type === 'group' && fo.childrenKey !== JSON.stringify(groupChildren(obj))) return false;
 
@@ -207,7 +207,7 @@ export function objectSize(obj: CanvasObject): { width: number; height: number }
 
 function baseSize(obj: CanvasObject): { width: number; height: number } {
     const p = obj.props;
-    if (obj.type === 'image') return { width: num(p.naturalWidth, 100), height: num(p.naturalHeight, 100) };
+    if (obj.type === 'image' || obj.type === 'qr' || obj.type === 'barcode') return { width: num(p.naturalWidth, 100), height: num(p.naturalHeight, 100) };
     if (obj.type === 'group') return { width: num(p.width, 40), height: num(p.height, 40) };
     if (obj.type === 'text') return { width: num(p.width, 80), height: num(p.height, num(p.fontSize, 4) * 1.2) };
     if (str(p.shape, '') === 'line') return { width: num(p.width, 40), height: num(p.strokeWidth, 1) };
@@ -307,6 +307,7 @@ export function makeImage(asset: UploadedImage, natural: { width: number; height
         props: {
             src: asset.url,
             assetId: asset.id,
+            ...(asset.name ? { name: asset.name } : {}),
             naturalWidth: natural.width,
             naturalHeight: natural.height,
             left: sheet.width / 2,
@@ -371,12 +372,88 @@ export function explodeGroup(group: Group, obj: CanvasObject): CanvasObject[] {
 
 /** Print standard; below this an image is flagged in the toolbar (plan: "image DPI warning"). */
 export const MIN_PRINT_DPI = 300;
+/** Critical print resolution threshold below which raster images look visibly pixelated. */
+export const LOW_PRINT_DPI = 150;
 
-/** Effective print resolution of an image at its current size on the sheet. */
+/** Effective print resolution of an image at its current size on the sheet (worst axis). */
 export function imageDpi(obj: CanvasObject): number | null {
     if (obj.type !== 'image') return null;
     const naturalWidth = num(obj.props.naturalWidth, 0);
-    const widthMm = objectSize(obj).width;
-    if (!naturalWidth || !widthMm) return null;
-    return Math.round(naturalWidth / (widthMm / 25.4));
+    const naturalHeight = num(obj.props.naturalHeight, 0);
+    const size = objectSize(obj);
+    if (!naturalWidth || !size.width) return null;
+    const dpiX = naturalWidth / (size.width / 25.4);
+    const dpiY = naturalHeight && size.height ? naturalHeight / (size.height / 25.4) : dpiX;
+    return Math.round(Math.min(dpiX, dpiY));
+}
+
+/** All raster images on a surface whose effective DPI is below `MIN_PRINT_DPI`. */
+export function lowDpiImages(objects: CanvasObject[]): { object: CanvasObject; dpi: number }[] {
+    const warnings: { object: CanvasObject; dpi: number }[] = [];
+    for (const obj of objects) {
+        const dpi = imageDpi(obj);
+        if (dpi !== null && dpi < MIN_PRINT_DPI) {
+            warnings.push({ object: obj, dpi });
+        }
+    }
+    return warnings;
+}
+
+export function makeQr(
+    spec: { src: string; value: string; ecc: string; color: string; background: string },
+    side: BoxSide,
+    sheet: SheetFrame,
+): CanvasObject {
+    const targetMm = Math.max(18, Math.min(35, Math.min(sheet.width, sheet.height) * 0.2));
+    const scale = targetMm / 512;
+    return {
+        id: newObjectId(),
+        type: 'qr',
+        side,
+        props: {
+            src: spec.src,
+            value: spec.value,
+            ecc: spec.ecc,
+            color: spec.color,
+            background: spec.background,
+            naturalWidth: 512,
+            naturalHeight: 512,
+            left: sheet.width / 2,
+            top: sheet.height / 2,
+            angle: 0,
+            scaleX: scale,
+            scaleY: scale,
+            opacity: 1,
+        },
+    };
+}
+
+export function makeBarcode(
+    spec: { src: string; format: string; value: string; width: number; height: number; color: string; background: string; displayValue: boolean },
+    side: BoxSide,
+    sheet: SheetFrame,
+): CanvasObject {
+    const targetWidthMm = Math.max(25, Math.min(55, sheet.width * 0.3));
+    const scale = targetWidthMm / Math.max(1, spec.width);
+    return {
+        id: newObjectId(),
+        type: 'barcode',
+        side,
+        props: {
+            src: spec.src,
+            format: spec.format,
+            value: spec.value,
+            color: spec.color,
+            background: spec.background,
+            displayValue: spec.displayValue,
+            naturalWidth: spec.width,
+            naturalHeight: spec.height,
+            left: sheet.width / 2,
+            top: sheet.height / 2,
+            angle: 0,
+            scaleX: scale,
+            scaleY: scale,
+            opacity: 1,
+        },
+    };
 }

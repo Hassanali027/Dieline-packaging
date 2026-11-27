@@ -73,9 +73,16 @@ export type ChipboardPiece = {
     quantity: number;
 };
 
+export type DielineLineTag = {
+    id: string;
+    path: string;
+    tag: 'cut' | 'fold';
+    label?: string;
+};
+
 export type BoxSource =
     | { kind: 'parametric'; params: BoxParams }
-    | { kind: 'uploaded-dieline'; fileId: string; panels: Panel[]; foldMapped: boolean }
+    | { kind: 'uploaded-dieline'; fileId: string; panels: Panel[]; foldMapped: boolean; lines?: DielineLineTag[] }
     | { kind: 'uploaded-model'; glbUrl: string; uvLayout: UvFace[] }
     | { kind: 'photo-mockup'; photoUrl: string; quad: [Pt, Pt, Pt, Pt] };
 

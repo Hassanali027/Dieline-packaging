@@ -1,4 +1,4 @@
-import { ElementsPanel, TextPanel, UploadsPanel } from '@/components/editor/AddPanels';
+import { ElementsPanel, QrBarcodePanel, TextPanel, UploadsPanel } from '@/components/editor/AddPanels';
 import BoxSettings from '@/components/editor/BoxSettings';
 import DielineCanvas, { type CanvasController } from '@/components/editor/DielineCanvas';
 import EditorHeader from '@/components/editor/EditorHeader';
@@ -50,6 +50,11 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
     const activePart = useEditorStore((s) => s.activePart);
     const setActivePart = useEditorStore((s) => s.setActivePart);
     const designParts = useEditorStore((s) => s.design.parts);
+    const source = useEditorStore((s) => s.design.source);
+    const showTurnInWarning = useEditorStore((s) => s.showTurnInWarning);
+    const toggleTurnInWarning = useEditorStore((s) => s.toggleTurnInWarning);
+    const lineTaggingMode = useEditorStore((s) => s.lineTaggingMode);
+    const setLineTaggingMode = useEditorStore((s) => s.setLineTaggingMode);
 
     // Rigid boxes: one dieline per part (lid / base / liner), each starting at (0, 0).
     const parts = useMemo(() => (result?.parts ?? []) as DesignPartKey[], [result]);
@@ -139,11 +144,13 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
         setDraftOffer(null);
     };
 
-    // Ctrl/Cmd + Z / Y (Shift+Z) for undo / redo, ignored while typing in a field.
+    // Ctrl/Cmd + Z / Y (Shift+Z) for undo / redo, ignored while typing in a field or editing canvas text.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            const tag = (document.activeElement?.tagName ?? '').toLowerCase();
-            if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+            if (readOnly) return;
+            const el = document.activeElement as HTMLElement | null;
+            const tag = (el?.tagName ?? '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' || el?.isContentEditable || controller.current?.isEditingText()) return;
             if (!(e.ctrlKey || e.metaKey)) return;
             const key = e.key.toLowerCase();
             const { undo, redo } = useEditorStore.temporal.getState();
@@ -157,7 +164,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, []);
+    }, [readOnly]);
 
     // When the dieline cannot be built, keep the canvas showing the last good one.
     const canvasNotice = !supported && params ? `The ${params.style} dieline is coming in a later sprint.` : null;
@@ -183,6 +190,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
                                 uploads: <UploadsPanel sheet={sheet} />,
                                 elements: <ElementsPanel sheet={sheet} />,
                                 text: <TextPanel sheet={sheet} />,
+                                qr: <QrBarcodePanel sheet={sheet} />,
                             }}
                         />
                     </div>
@@ -197,6 +205,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
                             onSelectPanel={setSelectedPanelId}
                             onZoomChange={setZoom}
                             controllerRef={controller}
+                            readOnly={readOnly}
                         />
 
                         {/* Canvas overlay: which sheet is shown (side, part) on the left, draft notice on the right. */}
@@ -220,6 +229,44 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
                                             options={parts.map((p) => ({ value: p, label: PART_LABELS[p] ?? p }))}
                                             onChange={(v) => setActivePart(v as DesignPartKey)}
                                         />
+                                    </>
+                                )}
+                                {sheetResult?.panels.some((p) => p.id.includes('turnin-')) && (
+                                    <>
+                                        <div className="mx-1 h-6 w-px bg-slate-200" />
+                                        <button
+                                            type="button"
+                                            aria-pressed={showTurnInWarning}
+                                            onClick={toggleTurnInWarning}
+                                            title="Toggle turn-in wrap zone warning shade"
+                                            className={cn(
+                                                'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                                                showTurnInWarning
+                                                    ? 'bg-amber-500/15 text-amber-800 ring-1 ring-amber-500/30'
+                                                    : 'text-slate-600 hover:bg-slate-900/5 hover:text-slate-900',
+                                            )}
+                                        >
+                                            Turn-in zone
+                                        </button>
+                                    </>
+                                )}
+                                {source.kind === 'uploaded-dieline' && (
+                                    <>
+                                        <div className="mx-1 h-6 w-px bg-slate-200" />
+                                        <button
+                                            type="button"
+                                            aria-pressed={lineTaggingMode}
+                                            onClick={() => setLineTaggingMode(!lineTaggingMode)}
+                                            title="Click dieline paths to tag them as Cut or Fold"
+                                            className={cn(
+                                                'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                                                lineTaggingMode
+                                                    ? 'bg-rose-600 text-white shadow-sm'
+                                                    : 'text-slate-600 hover:bg-slate-900/5 hover:text-slate-900',
+                                            )}
+                                        >
+                                            {lineTaggingMode ? 'Tagging lines (click path)' : 'Tag cut / fold'}
+                                        </button>
                                     </>
                                 )}
                             </div>

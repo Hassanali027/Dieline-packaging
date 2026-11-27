@@ -3,6 +3,7 @@ import BoxSettings from '@/components/editor/BoxSettings';
 import DielineCanvas, { type CanvasController } from '@/components/editor/DielineCanvas';
 import EditorHeader from '@/components/editor/EditorHeader';
 import EditorSidebar from '@/components/editor/EditorSidebar';
+import QuoteDialog, { type QuotePreviews } from '@/components/editor/QuoteDialog';
 import RightPanel from '@/components/editor/RightPanel';
 import { clearDraft, DraftBanner, draftHasWork, readDraft, type Draft } from '@/components/editor/SaveControls';
 import SelectionToolbar from '@/components/editor/SelectionToolbar';
@@ -79,6 +80,12 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
         }));
     }, [result, parts, partResults, outsideObjects, insideObjects, designParts]);
     const textures = useSheetTextures(surfaces, faceColors, material);
+
+    /** The printed sheets (folding box, or the base of a rigid box) as small PNGs for a quote. */
+    const getPreviews = (): QuotePreviews => {
+        const sheet = textures.surfaces.main ?? textures.surfaces.base ?? Object.values(textures.surfaces)[0];
+        return { outside: toPreviewPng(sheet?.outside ?? null), inside: toPreviewPng(sheet?.inside ?? null) };
+    };
     const sheet = sheetResult ? sheetResult.overallSize : null;
     // Read the local draft once, before the autosave can overwrite it.
     const [draftOffer, setDraftOffer] = useState<Draft | null>(() => {
@@ -165,6 +172,7 @@ export default function EditorPage({ products, activeProduct, savedDesign, share
                     autosave={!draftOffer}
                     readOnly={readOnly}
                     onEditCopy={editCopy}
+                    actions={<QuoteDialog params={params} getPreviews={getPreviews} />}
                 />
 
                 <div className="flex min-h-0 flex-1">
@@ -279,4 +287,17 @@ function Segmented({
             ))}
         </div>
     );
+}
+
+/** Max preview edge in px: keeps the PNG well under the server's 6 MB limit. */
+const PREVIEW_MAX_PX = 1600;
+
+function toPreviewPng(source: HTMLCanvasElement | null): string | undefined {
+    if (!source || !source.width || !source.height) return undefined;
+    const scale = Math.min(1, PREVIEW_MAX_PX / Math.max(source.width, source.height));
+    const out = document.createElement('canvas');
+    out.width = Math.round(source.width * scale);
+    out.height = Math.round(source.height * scale);
+    out.getContext('2d')?.drawImage(source, 0, 0, out.width, out.height);
+    return out.toDataURL('image/png');
 }

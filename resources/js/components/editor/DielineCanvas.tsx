@@ -94,7 +94,8 @@ export default function DielineCanvas({
     const sideRef = useRef(side);
     /** Which printed surface (part + side) the Fabric objects currently show. */
     const shownSurface = useRef(`${activePart}:${side}`);
-    const generation = useRef(0);
+    const buildToken = useRef(0);
+    const inFlight = useRef(new Map<string, number>());
     const groupRef = useRef<() => void>(() => {});
     const ungroupRef = useRef<() => void>(() => {});
     /** True while we change the Fabric selection ourselves, so its events are not echoed back. */
@@ -239,6 +240,7 @@ export default function DielineCanvas({
         });
         canvasRef.current = canvas;
         const boundObjects = fabricObjects.current;
+        const activeBuilds = inFlight.current;
 
         let spaceDown = false;
         let panning = false;
@@ -403,6 +405,7 @@ export default function DielineCanvas({
             window.removeEventListener('keyup', onKeyUp);
             canvasRef.current = null;
             boundObjects.clear();
+            activeBuilds.clear();
             void canvas.dispose();
         };
     }, [emitZoom, fit]);
@@ -522,7 +525,6 @@ export default function DielineCanvas({
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-        generation.current += 1;
         const map = fabricObjects.current;
 
         const surface = `${activePart}:${side}`;
@@ -532,6 +534,7 @@ export default function DielineCanvas({
             selecting.current = false;
             map.forEach((fo) => canvas.remove(fo));
             map.clear();
+            inFlight.current.clear();
             shownSurface.current = surface;
         }
 
@@ -548,45 +551,66 @@ export default function DielineCanvas({
             if (!wanted.has(id)) {
                 canvas.remove(fo);
                 map.delete(id);
+                inFlight.current.delete(id);
             }
-        }
-
-        const pending: Promise<void>[] = [];
-        for (const obj of objects) {
-            const fo = map.get(obj.id);
-            if (fo && applyToFabric(fo, obj)) continue;
-            if (fo) {
-                // Rebuilding (new image, curve, pattern tile…) is not a deselect: removing the active
-                // object fires selection:cleared, which must not empty the store's selection, or the
-                // toolbar closes mid-edit. syncSelection() selects the new object once it is added.
-                selecting.current = true;
-                canvas.remove(fo);
-                selecting.current = false;
-                map.delete(obj.id);
-            }
-            pending.push(
-                createFabricObject(obj).then((created) => {
-                    const latest = latestObjects.current.find((o) => o.id === obj.id);
-                    if (!created || !latest || shownSurface.current !== surface || map.has(obj.id)) return;
-                    applyToFabric(created, latest);
-                    map.set(obj.id, created);
-                    canvas.add(created);
-                }),
-            );
         }
 
         const finish = () => {
+            if (canvasRef.current !== canvas || shownSurface.current !== surface) return;
             restack();
             syncSelection();
             canvas.requestRenderAll();
         };
-        finish();
-        if (pending.length) {
-            void Promise.all(pending).then(() => {
-                // finish() is idempotent, so a slower pass may still restack after a newer one.
-                if (shownSurface.current === surface) finish();
-            });
+
+        for (const obj of objects) {
+            const fo = map.get(obj.id);
+            if (fo && applyToFabric(fo, obj)) continue;
+            // Keep any existing object visible while its replacement builds asynchronously, so rapid
+            // updates (e.g. dragging the colour picker on an icon) never blank out the artwork.
+            if (inFlight.current.has(obj.id)) continue;
+
+            const token = ++buildToken.current;
+            inFlight.current.set(obj.id, token);
+            void (async () => {
+                try {
+                    while (canvasRef.current === canvas && shownSurface.current === surface && inFlight.current.get(obj.id) === token) {
+                        const target = latestObjects.current.find((o) => o.id === obj.id);
+                        if (!target) break;
+                        const current = map.get(obj.id);
+                        if (current && applyToFabric(current, target)) {
+                            finish();
+                            break;
+                        }
+                        const builtKey = propsKey(target);
+                        const created = await createFabricObject(target);
+                        if (canvasRef.current !== canvas || shownSurface.current !== surface || inFlight.current.get(obj.id) !== token) {
+                            break;
+                        }
+                        const latest = latestObjects.current.find((o) => o.id === obj.id);
+                        if (!latest || !created) break;
+
+                        applyToFabric(created, latest);
+                        const prev = map.get(obj.id);
+                        if (prev) {
+                            selecting.current = true;
+                            canvas.remove(prev);
+                            selecting.current = false;
+                        }
+                        map.set(obj.id, created);
+                        canvas.add(created);
+                        finish();
+
+                        if (created.propsKey === propsKey(latest) || propsKey(latest) === builtKey) break;
+                    }
+                } finally {
+                    if (inFlight.current.get(obj.id) === token) {
+                        inFlight.current.delete(obj.id);
+                    }
+                }
+            })();
         }
+
+        finish();
     }, [objects, side, activePart, restack, syncSelection]);
 
     // Selection changed from outside the canvas (toolbar, sidebar, undo).
